@@ -1,181 +1,386 @@
 import { Player } from "./Entities";
 
+/**
+ * ============================================================================================
+ * TYPE-ZERO INTERCEPTOR RENDERER v3.0
+ * ============================================================================================
+ * 
+ * 视觉风格：Cyber-Industrial
+ * 核心技术：
+ * 1. 动态侧倾 (Dynamic Banking): 根据 X轴速度计算机身旋转角度。
+ * 2. 程序化纹理 (Procedural Texturing): 使用 Canvas API 绘制面板线和铆钉。
+ * 3. 矢量尾焰 (Vector Exhaust): 引擎火焰随推力波动。
+ */
+
+const SHIP_CONFIG = {
+    SCALE: 1.0,
+    BANKING_STRENGTH: 0.25, // 侧倾灵敏度 (0-1)
+    COLORS: {
+        HULL_DARK: '#0f172a',
+        HULL_LIGHT: '#334155',
+        ACCENT: '#0ea5e9', // 霓虹蓝
+        COCKPIT: '#f59e0b', // 琥珀色
+        ENGINE_CORE: '#ccfbf1',
+        ENGINE_OUTER: '#06b6d4'
+    }
+};
+
 export class PlayerModel {
-  static draw(ctx: CanvasRenderingContext2D, player: Player) {
-    const { x, y } = player.position;
-    
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.rotate(player.rotation);
-    
-    const s = 1.0; // Scale factor
+    /**
+     * 主渲染入口
+     */
+    static draw(ctx: CanvasRenderingContext2D, player: Player) {
+        const { x, y } = player.position;
+        const time = Date.now() / 1000;
+        
+        // --- 1. 计算物理状态 ---
+        // 侧倾角：根据水平速度模拟飞机转弯时的倾斜
+        const bankAngle = (player.velocity.x / 400) * SHIP_CONFIG.BANKING_STRENGTH;
+        // 限制最大侧倾角
+        const clampedBank = Math.max(-0.4, Math.min(0.4, bankAngle));
+        
+        // 推力强度：根据垂直速度判断是否加速
+        // 假设向上(-y)是加速
+        const thrustLevel = player.velocity.y < -10 ? 1.0 : 0.4;
+        const speedShake = (Math.random() - 0.5) * (thrustLevel > 0.8 ? 2 : 0);
 
-    // --- 1. ADVANCED ENGINE EXHAUST ---
-    const time = Date.now() / 1000;
-    // Calculate thrust based on velocity (visual feedback)
-    const thrustIntensity = Math.min(1.5, Math.max(0.8, Math.abs(player.velocity.y) / 200 + 1));
-    
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    
-    // F-117 Platypus exhaust configuration (wide, flat)
-    const engineY = 28 * s;
-    const exhaustBaseW = 10 * s;
-    
-    // Layer 1: Blue Core (Hot)
-    const gradCore = ctx.createLinearGradient(0, engineY, 0, engineY + 40 * thrustIntensity);
-    gradCore.addColorStop(0, 'rgba(200, 255, 255, 0.9)');
-    gradCore.addColorStop(1, 'rgba(0, 100, 255, 0)');
-    
-    ctx.fillStyle = gradCore;
-    // Left nozzle
-    ctx.beginPath();
-    ctx.moveTo(-12*s, engineY); ctx.lineTo(-4*s, engineY); ctx.lineTo(-8*s, engineY + 30*thrustIntensity); ctx.fill();
-    // Right nozzle
-    ctx.beginPath();
-    ctx.moveTo(12*s, engineY); ctx.lineTo(4*s, engineY); ctx.lineTo(8*s, engineY + 30*thrustIntensity); ctx.fill();
+        ctx.save();
+        ctx.translate(x + speedShake, y + speedShake);
+        ctx.rotate(player.rotation + clampedBank); // 叠加侧倾角
+        ctx.scale(SHIP_CONFIG.SCALE, SHIP_CONFIG.SCALE);
 
-    // Layer 2: Purple/Pink Afterburner (Turbulence)
-    const flicker = Math.sin(time * 50) * 0.1 + 0.9;
-    const gradOuter = ctx.createLinearGradient(0, engineY, 0, engineY + 60 * thrustIntensity * flicker);
-    gradOuter.addColorStop(0, 'rgba(100, 100, 255, 0.5)');
-    gradOuter.addColorStop(1, 'rgba(200, 50, 255, 0)');
-    
-    ctx.fillStyle = gradOuter;
-    // Left turbulence
-    ctx.beginPath(); ctx.moveTo(-14*s, engineY); ctx.lineTo(-2*s, engineY); ctx.lineTo(-8*s, engineY + 50*thrustIntensity*flicker); ctx.fill();
-    // Right turbulence
-    ctx.beginPath(); ctx.moveTo(14*s, engineY); ctx.lineTo(2*s, engineY); ctx.lineTo(8*s, engineY + 50*thrustIntensity*flicker); ctx.fill();
-    
-    ctx.restore();
+        // --- 2. 绘制层级 ---
+        
+        // Layer A: 引擎尾焰 (最底层)
+        this.drawEngineExhaust(ctx, thrustLevel, time);
 
-    // --- 2. FUSELAGE GEOMETRY ---
-    // Use Slate/Dark Blue gradients for stealth look
-    const bodyGrad = ctx.createLinearGradient(-20, -20, 20, 20);
-    bodyGrad.addColorStop(0, '#0f172a'); // Very dark slate
-    bodyGrad.addColorStop(0.4, '#334155'); // Highlight where light hits
-    bodyGrad.addColorStop(0.6, '#1e293b'); // Shadow
-    bodyGrad.addColorStop(1, '#020617'); // Almost black
+        // Layer B: 姿态调整喷口 (RCS)
+        this.drawRCSThrusters(ctx, player.velocity.x, time);
 
-    ctx.fillStyle = bodyGrad;
-    ctx.strokeStyle = '#475569'; // Panel lines color
-    ctx.lineWidth = 1;
+        // Layer C: 机身下层结构 (阴影与机械连接)
+        this.drawUnderstructure(ctx);
 
-    // The iconic F-117 diamond/arrowhead shape
-    ctx.beginPath();
-    ctx.moveTo(0, -40*s);     // Nose Tip
-    ctx.lineTo(6*s, -15*s);   // Cockpit side start
-    ctx.lineTo(35*s, 20*s);   // Wing tip
-    ctx.lineTo(18*s, 30*s);   // Trailing edge inner
-    ctx.lineTo(24*s, 40*s);   // Tail fin tip
-    ctx.lineTo(0, 32*s);      // Rear exhaust center
-    ctx.lineTo(-24*s, 40*s);
-    ctx.lineTo(-18*s, 30*s);
-    ctx.lineTo(-35*s, 20*s);
-    ctx.lineTo(-6*s, -15*s);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
+        // Layer D: 主装甲与机翼
+        this.drawMainHull(ctx, clampedBank);
 
-    // --- 3. SURFACE DETAILS (FACETS) ---
-    // Draw lighter facets to simulate the stealth angles
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.03)';
-    ctx.beginPath();
-    ctx.moveTo(0, -40*s);
-    ctx.lineTo(0, 32*s);      // Center spine
-    ctx.lineTo(18*s, 30*s);   // Right tail base
-    ctx.lineTo(6*s, -15*s);   // Right cockpit side
-    ctx.fill();
+        // Layer E: 座舱玻璃
+        this.drawCockpit(ctx);
 
-    // Intake Grilles (Rectangular grid intakes)
-    ctx.fillStyle = '#000000';
-    // Left Intake
-    ctx.beginPath(); ctx.moveTo(-6*s, -8*s); ctx.lineTo(-12*s, 2*s); ctx.lineTo(-5*s, 2*s); ctx.lineTo(-3*s, -8*s); ctx.fill();
-    // Right Intake
-    ctx.beginPath(); ctx.moveTo(6*s, -8*s); ctx.lineTo(12*s, 2*s); ctx.lineTo(5*s, 2*s); ctx.lineTo(3*s, -8*s); ctx.fill();
-    
-    // Intake Mesh lines
-    ctx.strokeStyle = '#333';
-    ctx.lineWidth = 0.5;
-    ctx.beginPath();
-    ctx.moveTo(-6*s, -3*s); ctx.lineTo(-3*s, -3*s);
-    ctx.moveTo(6*s, -3*s); ctx.lineTo(3*s, -3*s);
-    ctx.stroke();
+        // Layer F: 充能特效 (覆盖在机身上)
+        if (player.isCharging) {
+            this.drawChargingEffect(ctx, player.chargeLevel, time);
+        }
 
-    // --- 4. COCKPIT CANOPY ---
-    // F-117 has a very angular, gold-tinted canopy
-    const cockpitGrad = ctx.createLinearGradient(0, -25, 0, -10);
-    cockpitGrad.addColorStop(0, '#d97706'); // Gold/Amber top
-    cockpitGrad.addColorStop(0.5, '#b45309'); 
-    cockpitGrad.addColorStop(1, '#78350f'); // Darker bottom
-    
-    ctx.fillStyle = cockpitGrad;
-    ctx.shadowColor = '#fbbf24';
-    ctx.shadowBlur = 4;
-    
-    ctx.beginPath();
-    ctx.moveTo(0, -28*s);
-    ctx.lineTo(4*s, -18*s);
-    ctx.lineTo(0, -15*s);
-    ctx.lineTo(-4*s, -18*s);
-    ctx.closePath();
-    ctx.fill();
-    
-    // Glint on glass
-    ctx.shadowBlur = 0;
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
-    ctx.beginPath();
-    ctx.moveTo(0, -28*s);
-    ctx.lineTo(1.5*s, -22*s);
-    ctx.lineTo(0, -20*s);
-    ctx.fill();
+        // Layer G: 护盾 (最顶层)
+        // 假设 player 有 shieldActive 属性，如果没有可以忽略
+        if ((player as any).shieldActive || (player as any).hp > 100) { // 简单判定有护盾
+            this.drawEnergyShield(ctx, time);
+        }
 
-    // --- 5. NAV LIGHTS ---
-    // Left Red
-    ctx.fillStyle = '#ef4444';
-    ctx.shadowColor = '#ef4444'; ctx.shadowBlur = 6;
-    ctx.fillRect(-35*s, 20*s, 2, 2);
-    // Right Green
-    ctx.fillStyle = '#22c55e';
-    ctx.shadowColor = '#22c55e'; ctx.shadowBlur = 6;
-    ctx.fillRect(35*s, 20*s, 2, 2);
-    ctx.shadowBlur = 0;
-
-    // --- 6. CHARGING EFFECT ---
-    if (player.isCharging) {
-         ctx.save();
-         ctx.globalCompositeOperation = 'lighter';
-         const chargePct = player.chargeLevel / 100;
-         const pulse = 1 + Math.sin(time * 30) * 0.2;
-         
-         // Glow accumulating at the nose
-         ctx.shadowColor = '#00ffff';
-         ctx.shadowBlur = 15 * chargePct * pulse;
-         ctx.fillStyle = `rgba(0, 255, 255, ${chargePct})`;
-         
-         ctx.beginPath();
-         ctx.arc(0, -40*s, 3 * chargePct * pulse, 0, Math.PI*2);
-         ctx.fill();
-         
-         // Electricity lines running over the wings
-         if (Math.random() > 0.5) {
-             ctx.strokeStyle = `rgba(150, 255, 255, ${chargePct * 0.8})`;
-             ctx.lineWidth = 1;
-             ctx.beginPath();
-             // Random path on left wing
-             ctx.moveTo(0, -35*s);
-             ctx.lineTo(-10*s + (Math.random()-0.5)*5, -10*s);
-             ctx.lineTo(-35*s, 20*s);
-             // Random path on right wing
-             ctx.moveTo(0, -35*s);
-             ctx.lineTo(10*s + (Math.random()-0.5)*5, -10*s);
-             ctx.lineTo(35*s, 20*s);
-             ctx.stroke();
-         }
-         
-         ctx.restore();
+        ctx.restore();
     }
 
-    ctx.restore();
-  }
+    /**
+     * 绘制复杂的离子引擎尾焰
+     */
+    private static drawEngineExhaust(ctx: CanvasRenderingContext2D, intensity: number, time: number) {
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        
+        const baseLen = 25 + intensity * 35;
+        const flicker = Math.sin(time * 60) * 0.1 + 0.9;
+        const len = baseLen * flicker;
+
+        // 主引擎位置偏移
+        const engineY = 25;
+        const engineX_L = -8;
+        const engineX_R = 8;
+
+        // 渐变定义
+        const grad = ctx.createLinearGradient(0, engineY, 0, engineY + len);
+        grad.addColorStop(0, SHIP_CONFIG.COLORS.ENGINE_CORE);
+        grad.addColorStop(0.3, SHIP_CONFIG.COLORS.ENGINE_OUTER);
+        grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+
+        ctx.fillStyle = grad;
+
+        // 左引擎
+        ctx.beginPath();
+        ctx.moveTo(engineX_L - 4, engineY);
+        ctx.lineTo(engineX_L + 4, engineY);
+        ctx.lineTo(engineX_L, engineY + len);
+        ctx.fill();
+
+        // 右引擎
+        ctx.beginPath();
+        ctx.moveTo(engineX_R - 4, engineY);
+        ctx.lineTo(engineX_R + 4, engineY);
+        ctx.lineTo(engineX_R, engineY + len);
+        ctx.fill();
+
+        // 冲击波环 (Shock diamonds)
+        if (intensity > 0.8) {
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+            for(let i=1; i<3; i++) {
+                const dy = engineY + (len * 0.3 * i);
+                const w = 6 - i;
+                ctx.beginPath();
+                ctx.ellipse(engineX_L, dy, w, 2, 0, 0, Math.PI*2);
+                ctx.ellipse(engineX_R, dy, w, 2, 0, 0, Math.PI*2);
+                ctx.fill();
+            }
+        }
+
+        ctx.restore();
+    }
+
+    /**
+     * 绘制姿态控制喷口 (Reaction Control System)
+     * 当飞船左右移动时喷射
+     */
+    private static drawRCSThrusters(ctx: CanvasRenderingContext2D, velX: number, time: number) {
+        if (Math.abs(velX) < 10) return;
+
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.fillStyle = 'rgba(200, 255, 255, 0.6)';
+
+        const flareSize = (Math.sin(time * 40) + 2) * 2;
+        
+        // 向左飞 -> 右侧喷口喷射
+        if (velX < -10) {
+            this.drawFlare(ctx, 18, -5, flareSize, Math.PI / 4); // 右前翼
+            this.drawFlare(ctx, 18, 15, flareSize, Math.PI / 2); // 右后翼
+        }
+        
+        // 向右飞 -> 左侧喷口喷射
+        if (velX > 10) {
+            this.drawFlare(ctx, -18, -5, flareSize, -Math.PI / 4); // 左前翼
+            this.drawFlare(ctx, -18, 15, flareSize, -Math.PI / 2); // 左后翼
+        }
+
+        ctx.restore();
+    }
+
+    private static drawFlare(ctx: CanvasRenderingContext2D, x: number, y: number, len: number, angle: number) {
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(angle);
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(-2, len);
+        ctx.lineTo(2, len);
+        ctx.fill();
+        ctx.restore();
+    }
+
+    /**
+     * 绘制机械连接层 (连接机翼和机身的黑色结构)
+     */
+    private static drawUnderstructure(ctx: CanvasRenderingContext2D) {
+        ctx.fillStyle = '#1e293b';
+        ctx.beginPath();
+        ctx.moveTo(0, -35);
+        ctx.lineTo(20, 20);
+        ctx.lineTo(0, 30);
+        ctx.lineTo(-20, 20);
+        ctx.fill();
+    }
+
+    /**
+     * 绘制主装甲 (Main Hull)
+     * 包含复杂的面板线和光影
+     */
+    private static drawMainHull(ctx: CanvasRenderingContext2D, bank: number) {
+        // 机身渐变 (模拟金属光泽)
+        const grad = ctx.createLinearGradient(-20, 0, 20, 0);
+        grad.addColorStop(0, SHIP_CONFIG.COLORS.HULL_DARK);
+        grad.addColorStop(0.5 - bank * 0.3, SHIP_CONFIG.COLORS.HULL_LIGHT); // 高光随侧倾移动
+        grad.addColorStop(1, SHIP_CONFIG.COLORS.HULL_DARK);
+
+        ctx.fillStyle = grad;
+        ctx.strokeStyle = '#475569';
+        ctx.lineWidth = 1;
+
+        // 1. 主机身形状 (Arrowhead)
+        ctx.beginPath();
+        ctx.moveTo(0, -42); // 鼻锥
+        ctx.lineTo(8, -10);
+        ctx.lineTo(8, 20);
+        ctx.lineTo(0, 28);
+        ctx.lineTo(-8, 20);
+        ctx.lineTo(-8, -10);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+
+        // 2. 左翼 (Forward Swept Wing look)
+        this.drawWing(ctx, -1, bank);
+        
+        // 3. 右翼
+        this.drawWing(ctx, 1, bank);
+
+        // 4. 表面细节 (面板线)
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+        ctx.beginPath();
+        ctx.moveTo(0, -30); ctx.lineTo(0, 20); // 中轴线
+        ctx.moveTo(-8, -10); ctx.lineTo(8, -10); // 横切线
+        ctx.stroke();
+        
+        // 5. 散热口
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(-6, 15, 4, 8);
+        ctx.fillRect(2, 15, 4, 8);
+    }
+
+    private static drawWing(ctx: CanvasRenderingContext2D, dir: number, bank: number) {
+        // dir: -1 for left, 1 for right
+        ctx.save();
+        ctx.scale(dir, 1); // 镜像绘制
+
+        const wingGrad = ctx.createLinearGradient(0, 0, 40, 0);
+        wingGrad.addColorStop(0, '#334155');
+        wingGrad.addColorStop(1, '#0f172a');
+
+        ctx.fillStyle = wingGrad;
+        ctx.strokeStyle = '#64748b';
+
+        ctx.beginPath();
+        ctx.moveTo(8, -8);
+        ctx.lineTo(35, 10);  // 翼尖前缘
+        ctx.lineTo(35, 22);  // 翼尖
+        ctx.lineTo(20, 32);  // 翼根后缘
+        ctx.lineTo(8, 20);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+
+        // 翼尖灯
+        ctx.fillStyle = dir === -1 ? '#ef4444' : '#22c55e'; // 左红右绿
+        ctx.shadowColor = ctx.fillStyle;
+        ctx.shadowBlur = 5;
+        ctx.fillRect(33, 18, 3, 3);
+        ctx.shadowBlur = 0;
+
+        // 武器挂载点细节
+        ctx.fillStyle = '#1e293b';
+        ctx.fillRect(20, 10, 4, 15);
+
+        ctx.restore();
+    }
+
+    /**
+     * 绘制座舱 (Cockpit)
+     */
+    private static drawCockpit(ctx: CanvasRenderingContext2D) {
+        const grad = ctx.createLinearGradient(0, -25, 0, -5);
+        grad.addColorStop(0, '#f59e0b'); // 金色顶部
+        grad.addColorStop(0.5, '#d97706'); 
+        grad.addColorStop(1, '#78350f'); // 暗色底部
+        
+        ctx.fillStyle = grad;
+        // 玻璃反射光
+        ctx.shadowColor = '#fbbf24';
+        ctx.shadowBlur = 8;
+
+        ctx.beginPath();
+        ctx.moveTo(0, -28);
+        ctx.lineTo(4, -15);
+        ctx.lineTo(0, -12);
+        ctx.lineTo(-4, -15);
+        ctx.closePath();
+        ctx.fill();
+
+        // 高光反射条
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+        ctx.beginPath();
+        ctx.moveTo(0, -26);
+        ctx.lineTo(2, -18);
+        ctx.lineTo(0, -16);
+        ctx.fill();
+    }
+
+    /**
+     * 蓄力特效 (Charging)
+     * 能量汇聚于机头，伴随电弧
+     */
+    private static drawChargingEffect(ctx: CanvasRenderingContext2D, level: number, time: number) {
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        
+        const pct = level / 100;
+        const radius = 5 + pct * 15;
+        const color = `rgba(0, 255, 255, ${pct})`;
+
+        // 核心光球
+        const grad = ctx.createRadialGradient(0, -42, 0, 0, -42, radius);
+        grad.addColorStop(0, '#ffffff');
+        grad.addColorStop(0.4, '#0ea5e9');
+        grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(0, -42, radius, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 汇聚电弧 (Imploding Arcs)
+        if (pct > 0.3) {
+            ctx.strokeStyle = '#e0f2fe';
+            ctx.lineWidth = 1.5;
+            const arcCount = Math.floor(pct * 5);
+            
+            for(let i=0; i<arcCount; i++) {
+                const angle = time * 10 + i * (Math.PI * 2 / arcCount);
+                const dist = 30 - pct * 20; // 越充能越近
+                const sx = Math.cos(angle) * dist;
+                const sy = -42 + Math.sin(angle) * dist;
+                
+                ctx.beginPath();
+                ctx.moveTo(sx, sy);
+                ctx.lineTo(0, -42);
+                ctx.stroke();
+            }
+        }
+
+        ctx.restore();
+    }
+
+    /**
+     * 能量护盾 (Energy Shield)
+     * 六边形蜂窝网格力场
+     */
+    private static drawEnergyShield(ctx: CanvasRenderingContext2D, time: number) {
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        
+        const radius = 55;
+        const alpha = Math.abs(Math.sin(time * 2)) * 0.15 + 0.05;
+        
+        // 1. 护盾边缘
+        ctx.strokeStyle = `rgba(14, 165, 233, ${alpha + 0.2})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, 5, radius, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // 2. 护盾填充 (微弱的蓝色)
+        ctx.fillStyle = `rgba(14, 165, 233, ${alpha * 0.3})`;
+        ctx.fill();
+
+        // 3. 扫描线效果 (Holographic Scanline)
+        ctx.beginPath();
+        ctx.arc(0, 5, radius, 0, Math.PI * 2);
+        ctx.clip(); // 限制绘制区域在圆内
+
+        const scanY = (time * 100) % (radius * 2) - radius;
+        ctx.strokeStyle = `rgba(255, 255, 255, ${alpha * 0.5})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(-radius, 5 + scanY);
+        ctx.lineTo(radius, 5 + scanY);
+        ctx.stroke();
+
+        ctx.restore();
+    }
 }
