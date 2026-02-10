@@ -1,10 +1,5 @@
 import { Entity } from "./Entities";
 import { EntityType } from "../types";
-
-/**
- * HELPER CLASS: Black Hole Particle
- * 经过优化的黑洞粒子，支持更大的半径和更广的颜色分布
- */
 class BHParticle {
     angle: number;
     distance: number;
