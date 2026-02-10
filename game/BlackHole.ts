@@ -23,7 +23,7 @@ class BHParticle {
     reset(maxRadius: number, startFullAlpha: boolean = false) {
         // Distribution: Biased towards center for density
         const r = Math.random();
-        const distributionCurve = Math.pow(r, 3.0); 
+        const distributionCurve = Math.pow(r, 2.0); 
         
         // Define ranges
         const horizonRadius = 40; 
@@ -40,7 +40,7 @@ class BHParticle {
         // Factor 200:
         // at r=40 (Inner): 5 rad/s (~0.8 rev/s) - Fast
         // at r=320 (Outer): 0.6 rad/s (~0.1 rev/s) - Slow
-        const angularFactor = 200; 
+        const angularFactor = 400; 
         this.speed = (angularFactor / this.distance) * (0.8 + Math.random() * 0.4);
         
         // Size variation
@@ -123,12 +123,12 @@ class SpaceRipple {
 export class BlackHole extends Entity {
     life: number = 8.0; 
     
-    maxRadius: number = 320; 
+    maxRadius: number = 1200; 
     pullRadius: number = 550; 
     eventHorizonRadius: number = 40;
     
     particles: BHParticle[] = [];
-    particleCount: number = 8000; 
+    particleCount: number = 16000; 
     
     ripples: SpaceRipple[] = [];
     rippleTimer: number = 0;
