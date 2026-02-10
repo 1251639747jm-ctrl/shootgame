@@ -1,5 +1,3 @@
---- START OF FILE Laser.ts ---
-
 import { Entity } from "./Entities";
 import { EntityType, Vector2, WeaponType } from "../types";
 import { Player } from "./Entities";
