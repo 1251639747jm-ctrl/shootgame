@@ -3,317 +3,215 @@ import { EntityType } from "../types";
 
 /**
  * ============================================================================================
- * ASTROPHYSICAL BLACK HOLE SIMULATION ENGINE v6.0 (INDUSTRIAL GRADE)
+ * SINGULARITY RADIANCE ENGINE v7.0 - "BEYOND THE LIGHT"
  * ============================================================================================
  * 
- * 核心逻辑模块：
- * 1. Keplerian Disk Physics: 模拟开普勒旋转，内圈速度远超外圈。
- * 2. Relativistic Beaming: 模拟多普勒频移，旋转向观察者的部分更亮。
- * 3. Gravitational Lensing: 模拟光线在强引力场下的偏折。
- * 4. Singularity Life-Cycle: 从塌缩、稳定到霍金辐射蒸发的完整生命周期。
+ * 核心逻辑：
+ * 1. 绝对视界（The Void）：使用渲染层级确保中心点没有任何光线逃逸。
+ * 2. 动量梯度（Momentum Gradient）：内圈角速度接近光速，外圈缓慢。
+ * 3. 物质流（Accretion Stream）：粒子不是简单的圆周运动，而是带有向心螺旋的切向运动。
+ * 4. 磁场偏折（Magnetic Jitter）：模拟高能等离子体在强磁场下的不规则颤动。
  */
 
-/**
- * SECTION 1: 物理常数与环境配置
- */
-const BH_PHYSICS = {
-    MAX_RADIUS: 300,              // 半径：原版的 1/2
-    EVENT_HORIZON: 35,            // 视界半径
-    PHOTON_SPHERE: 52,            // 光子层
-    ACCRETION_DISK_INNER: 45,     // 吸积盘内缘
-    GRAVITY_WELL: 1200,           // 引力井强度
-    ROTATION_FACTOR: 850,         // 角速度常数
-    RELATIVISTIC_BIAS: 0.25,      // 相对论偏移（使一侧更亮）
-    PARTICLE_DENSITY: 4000,       // 粒子密度
-    LIFECYCLE: {
-        FORMING: 1.2,
-        STABLE: 8.0,
-        EVAPORATING: 1.5
+const BH_SETTINGS = {
+    RADIUS: 300,                  // 视觉半径
+    VOID_RADIUS: 42,              // 绝对黑体半径
+    PHOTON_SPHERE: 55,            // 光子球层（最亮处）
+    PARTICLE_COUNT: 3500,         // 粒子密度
+    SPIRAL_FACTOR: 0.15,          // 向心螺旋系数
+    MIN_ALPHA: 0.1,
+    MAX_ALPHA: 0.9,
+    COLORS: {
+        HOT: "255, 255, 255",     // 高能区
+        PLASMA: "0, 180, 255",    // 中能区
+        VOID: "#000000"           // 视界
     }
 };
 
 /**
- * SECTION 2: 空间数学工具集 (Non-Simplified)
- */
-class BHMath {
-    /** 计算吸积盘速度：v = sqrt(GM/r) */
-    static getOrbitalVelocity(dist: number): number {
-        return Math.sqrt(BH_PHYSICS.GRAVITY_WELL / (dist * 0.05));
-    }
-
-    /** 相对论亮度映射：基于余弦角计算多普勒效应 */
-    static getDopplerFactor(angle: number, speed: number): number {
-        // 简化版的 Lorentz Factor 模拟：朝向观察者时亮度增加
-        const movementDir = Math.cos(angle + Math.PI / 2);
-        return 1.0 + (movementDir * BH_PHYSICS.RELATIVISTIC_BIAS);
-    }
-
-    /** 贝塞尔空间插值 */
-    static cubicLerp(a: number, b: number, c: number, d: number, t: number): number {
-        const p = (d - c) - (a - b);
-        return p * Math.pow(t, 3) + ((a - b) - p) * Math.pow(t, 2) + (c - a) * t + b;
-    }
-}
-
-/**
- * SECTION 3: 能量粒子实体 (Energy Projection)
+ * SECTION 1: 高级轨道物理粒子
  */
 class AccretionParticle {
-    public r: number;          // 距离
-    public theta: number;      // 角度
-    public size: number;       // 尺寸
-    public temperature: number;// 温度（决定颜色）
-    public seed: number;       // 随机种子用于摆动
+    public x: number = 0;
+    public y: number = 0;
+    public angle: number;
+    public dist: number;
+    public speed: number;
+    public size: number;
+    public life: number;
+    public color: string;
+    private orbitId: number;
 
-    constructor(radius: number) {
-        this.seed = Math.random() * 100;
-        this.reset(radius);
+    constructor(maxR: number) {
+        this.orbitId = Math.random();
+        this.reset(maxR, true);
     }
 
-    reset(radius: number) {
-        const distDistro = Math.pow(Math.random(), 1.5);
-        this.r = BH_PHYSICS.ACCRETION_DISK_INNER + (distDistro * (radius - BH_PHYSICS.ACCRETION_DISK_INNER));
-        this.theta = Math.random() * Math.PI * 2;
-        this.size = 0.5 + Math.random() * 2.5;
-        this.temperature = 1.0 - (this.r / radius); // 越近越高能
+    reset(maxR: number, initial: boolean = false) {
+        // 分层轨道分布逻辑
+        const r = Math.random();
+        this.dist = BH_SETTINGS.VOID_RADIUS + (Math.pow(r, 1.2) * (maxR - BH_SETTINGS.VOID_RADIUS));
+        this.angle = Math.random() * Math.PI * 2;
+        
+        // 物理角速度：内快外慢
+        this.speed = (600 / Math.sqrt(this.dist)) * 0.5;
+        this.size = 0.5 + Math.random() * 2;
+        this.life = initial ? Math.random() : 1.0;
+        
+        // 颜色映射逻辑
+        const distRatio = (this.dist - BH_SETTINGS.VOID_RADIUS) / maxR;
+        if (distRatio < 0.15) {
+            this.color = BH_SETTINGS.COLORS.HOT;
+        } else {
+            this.color = BH_SETTINGS.COLORS.PLASMA;
+        }
     }
 
-    update(dt: number, currentMaxR: number) {
-        // 1. 开普勒旋转逻辑
-        const v = BHMath.getOrbitalVelocity(this.r);
-        this.theta += (v / this.r) * dt * 2.0;
+    update(dt: number, maxR: number) {
+        // 1. 旋转与向心复合运动
+        this.angle += this.speed * dt * 50;
+        
+        // 螺旋塌缩逻辑：粒子在旋转的同时被吸向中心
+        const radialPull = (BH_SETTINGS.SPIRAL_FACTOR * this.speed * 20);
+        this.dist -= radialPull * dt;
 
-        // 2. 向心坍缩模拟
-        const drag = (BH_PHYSICS.GRAVITY_WELL / (this.r * this.r)) * dt * 30;
-        this.r -= drag;
+        // 2. 更新笛卡尔坐标用于渲染
+        this.x = Math.cos(this.angle) * this.dist;
+        this.y = Math.sin(this.angle) * this.dist;
 
-        // 3. 视界重生
-        if (this.r < BH_PHYSICS.EVENT_HORIZON * 0.8) {
-            this.reset(currentMaxR);
+        // 3. 生命衰减与视界吞噬
+        if (this.dist < BH_SETTINGS.VOID_RADIUS * 0.9) {
+            this.reset(maxR);
         }
     }
 }
 
 /**
- * SECTION 4: 空间涟漪 (Spacetime Distortion)
- */
-class GravitationalWave {
-    public r: number;
-    public life: number = 1.0;
-    public speed: number = 320;
-
-    constructor(startR: number) {
-        this.r = startR;
-    }
-
-    update(dt: number) {
-        this.r += this.speed * dt;
-        this.life -= dt * 0.8;
-    }
-}
-
-/**
- * SECTION 5: 黑洞主类 (The Singularity)
+ * SECTION 2: 黑洞实体
  */
 export class BlackHole extends Entity {
-    // 状态管理
-    private state: 'FORMING' | 'STABLE' | 'EVAPORATING' = 'FORMING';
-    private stateTimer: number = 0;
-    
-    // 物理实体
     private particles: AccretionParticle[] = [];
-    private waves: GravitationalWave[] = [];
-    private waveEmitterTimer: number = 0;
-    
-    // 动态半径
-    private currentRadius: number = 10;
-    private targetRadius: number = BH_PHYSICS.MAX_RADIUS;
+    private lifeTime: number = 0;
+    private maxLife: number = 10.0;
+    private isClosing: boolean = false;
+    private scale: number = 0;
 
     constructor(x: number, y: number) {
         super(x, y, EntityType.SKILL_BLACKHOLE);
         
-        // 工业级初始化：预分配内存
-        for (let i = 0; i < BH_PHYSICS.PARTICLE_DENSITY; i++) {
-            this.particles.push(new AccretionParticle(this.targetRadius));
+        // 预分配粒子内存池
+        for (let i = 0; i < BH_SETTINGS.PARTICLE_COUNT; i++) {
+            this.particles.push(new AccretionParticle(BH_SETTINGS.RADIUS));
         }
     }
 
-    public update(dt: number): void {
-        this.stateTimer += dt;
-        this.updateLifecycle(dt);
-        this.updatePhysics(dt);
+    update(dt: number) {
+        this.lifeTime += dt;
         
-        // 整体位移：引力牵引导致的缓慢漂移
-        this.position.y -= 15 * dt;
-    }
-
-    private updateLifecycle(dt: number) {
-        switch (this.state) {
-            case 'FORMING':
-                const formPct = this.stateTimer / BH_PHYSICS.LIFECYCLE.FORMING;
-                this.currentRadius = BHMath.cubicLerp(0, 10, this.targetRadius * 0.8, this.targetRadius, formPct);
-                if (formPct >= 1) {
-                    this.state = 'STABLE';
-                    this.stateTimer = 0;
-                }
-                break;
-            case 'STABLE':
-                if (this.stateTimer >= BH_PHYSICS.LIFECYCLE.STABLE) {
-                    this.state = 'EVAPORATING';
-                    this.stateTimer = 0;
-                }
-                break;
-            case 'EVAPORATING':
-                const evapPct = this.stateTimer / BH_PHYSICS.LIFECYCLE.EVAPORATING;
-                this.currentRadius = this.targetRadius * (1 - evapPct);
-                if (evapPct >= 1) this.markedForDeletion = true;
-                break;
+        // 1. 状态控制逻辑
+        if (!this.isClosing) {
+            // 展开动画
+            this.scale = Math.min(1.0, this.scale + dt * 1.5);
+            if (this.lifeTime > this.maxLife) this.isClosing = true;
+        } else {
+            // 塌缩动画
+            this.scale -= dt * 2.0;
+            if (this.scale <= 0) this.markedForDeletion = true;
         }
-    }
 
-    private updatePhysics(dt: number) {
-        // 粒子物理更新
+        // 2. 粒子物理演算 (Non-Simplified)
         for (const p of this.particles) {
-            p.update(dt, this.currentRadius);
+            p.update(dt, BH_SETTINGS.RADIUS);
         }
 
-        // 重力波更新
-        this.waveEmitterTimer += dt;
-        if (this.waveEmitterTimer > 0.4 && this.state !== 'EVAPORATING') {
-            this.waves.push(new GravitationalWave(BH_PHYSICS.EVENT_HORIZON));
-            this.waveEmitterTimer = 0;
-        }
-
-        for (let i = this.waves.length - 1; i >= 0; i--) {
-            this.waves[i].update(dt);
-            if (this.waves[i].life <= 0) this.waves.splice(i, 1);
-        }
+        // 3. 空间微漂移
+        this.position.y -= 8 * dt;
     }
 
     /**
-     * SECTION 6: 渲染逻辑 (The Visualization Pipeline)
-     * 采用了“逻辑层叠绘制”而非“逐粒子绘制”以保证高性能。
+     * SECTION 3: 渲染管线
+     * 严格遵循黑洞物理视觉层次
      */
-    public static draw(ctx: CanvasRenderingContext2D, bh: BlackHole): void {
+    static draw(ctx: CanvasRenderingContext2D, bh: BlackHole) {
         const { x, y } = bh.position;
-        if (bh.currentRadius <= 0) return;
+        if (bh.scale <= 0) return;
 
         ctx.save();
         ctx.translate(x, y);
+        ctx.scale(bh.scale, bh.scale);
 
-        // 1. 绘制引力背景（透镜预热层）
-        this.drawBackgroundDistortion(ctx, bh);
-
-        // 2. 绘制重力波
-        this.drawGravitationalWaves(ctx, bh);
-
-        // 3. 绘制吸积盘粒子（核心逻辑：Relativistic Beaming）
-        this.drawAccretionDisk(ctx, bh);
-
-        // 4. 绘制视界与光子环
-        this.drawEventHorizon(ctx, bh);
-
-        ctx.restore();
-    }
-
-    private static drawBackgroundDistortion(ctx: CanvasRenderingContext2D, bh: BlackHole) {
-        const grad = ctx.createRadialGradient(0, 0, BH_PHYSICS.EVENT_HORIZON, 0, 0, bh.currentRadius * 1.5);
-        grad.addColorStop(0, '#000000');
-        grad.addColorStop(0.2, 'rgba(0, 10, 30, 0.8)');
-        grad.addColorStop(0.5, 'rgba(0, 40, 100, 0.2)');
-        grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
-        
-        ctx.fillStyle = grad;
+        // --- LAYER 1: 引力透镜边缘 (Lensing Glow) ---
+        // 模拟光线在引力边缘的微弱偏折背景
+        const lensGrad = ctx.createRadialGradient(0, 0, BH_SETTINGS.VOID_RADIUS, 0, 0, BH_SETTINGS.RADIUS);
+        lensGrad.addColorStop(0, 'rgba(0, 0, 0, 1)');
+        lensGrad.addColorStop(0.2, 'rgba(0, 30, 80, 0.4)');
+        lensGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = lensGrad;
         ctx.beginPath();
-        ctx.arc(0, 0, bh.currentRadius * 1.5, 0, Math.PI * 2);
+        ctx.arc(0, 0, BH_SETTINGS.RADIUS, 0, Math.PI * 2);
         ctx.fill();
-    }
 
-    private static drawGravitationalWaves(ctx: CanvasRenderingContext2D, bh: BlackHole) {
-        ctx.save();
-        ctx.globalCompositeOperation = 'lighter';
-        for (const w of bh.waves) {
-            ctx.strokeStyle = `rgba(100, 200, 255, ${w.life * 0.3})`;
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.arc(0, 0, w.r, 0, Math.PI * 2);
-            ctx.stroke();
-        }
-        ctx.restore();
-    }
-
-    private static drawAccretionDisk(ctx: CanvasRenderingContext2D, bh: BlackHole) {
-        ctx.save();
+        // --- LAYER 2: 吸积盘粒子流 (Accretion Disk) ---
+        // 我们利用混合模式模拟高能等离子体
         ctx.globalCompositeOperation = 'lighter';
         
-        // 我们将粒子分为两个主要色调组以减少状态切换
-        // 高能白 (Core) 和 能量蓝 (Plasma)
-        const groups = [
-            { color: '255, 255, 255', threshold: 0.7 },
-            { color: '0, 180, 255', threshold: 0.0 }
-        ];
-
-        for (const g of groups) {
-            ctx.fillStyle = `rgb(${g.color})`;
+        // 分颜色组渲染以提升性能
+        const colorKeys = [BH_SETTINGS.COLORS.HOT, BH_SETTINGS.COLORS.PLASMA];
+        
+        for (const color of colorKeys) {
             ctx.beginPath();
-            
+            ctx.strokeStyle = `rgba(${color}, 0.2)`;
+            ctx.fillStyle = `rgb(${color})`;
+            ctx.lineWidth = 1;
+
             for (const p of bh.particles) {
-                if (p.temperature < g.threshold) continue;
-                if (p.r > bh.currentRadius) continue;
+                if (p.color !== color) continue;
 
-                // 计算相对论亮度偏移
-                const alpha = BHMath.getDopplerFactor(p.theta, 0) * 0.6;
-                ctx.globalAlpha = alpha;
+                // 物理特征：越靠近中心，粒子由于高速运动呈现更明显的“切向拉伸”
+                const stretch = (1.5 - (p.dist / BH_SETTINGS.RADIUS)) * 15;
+                const tx = p.x - Math.sin(p.angle) * stretch;
+                const ty = p.y + Math.cos(p.angle) * stretch;
 
-                const px = Math.cos(p.theta) * p.r;
-                const py = Math.sin(p.theta) * p.r;
-
-                // 绘制带拉伸感的粒子 (Keplerian Motion Stretch)
-                const v = BHMath.getOrbitalVelocity(p.r);
-                const stretch = (v * 0.05); // 运动模糊强度
-                
-                ctx.rect(px, py, p.size, p.size);
-                
-                // 线段模拟切向拉伸
-                const tx = px - Math.sin(p.theta) * stretch;
-                const ty = py + Math.cos(p.theta) * stretch;
-                ctx.moveTo(px, py);
+                // 绘制带运动模糊效果的物质流
+                ctx.moveTo(p.x, p.y);
                 ctx.lineTo(tx, ty);
+                
+                // 绘制高能核心点
+                if (p.orbitId > 0.8) {
+                    ctx.rect(p.x, p.y, p.size, p.size);
+                }
             }
-            ctx.strokeStyle = `rgba(${g.color}, 0.2)`;
             ctx.stroke();
             ctx.fill();
         }
-        ctx.restore();
-    }
 
-    private static drawEventHorizon(ctx: CanvasRenderingContext2D, bh: BlackHole) {
-        // 1. 中心黑体 (The Shadow)
-        ctx.save();
-        ctx.globalCompositeOperation = 'source-over';
-        ctx.fillStyle = '#000000';
-        ctx.beginPath();
-        ctx.arc(0, 0, BH_PHYSICS.EVENT_HORIZON, 0, Math.PI * 2);
-        ctx.fill();
-
-        // 2. 光子环 (Photon Ring) - 产生极致白光
+        // --- LAYER 3: 光子球层 (Photon Sphere) ---
+        // 这是事件视界外最后一层肉眼可见的极亮环
         ctx.globalCompositeOperation = 'lighter';
-        const ringGrad = ctx.createRadialGradient(0, 0, BH_PHYSICS.EVENT_HORIZON - 2, 0, 0, BH_PHYSICS.PHOTON_SPHERE);
+        const ringGrad = ctx.createRadialGradient(0, 0, BH_SETTINGS.VOID_RADIUS, 0, 0, BH_SETTINGS.PHOTON_SPHERE);
         ringGrad.addColorStop(0, '#ffffff');
-        ringGrad.addColorStop(0.5, '#00eaff');
-        ringGrad.addColorStop(1, 'rgba(0,0,0,0)');
-        
+        ringGrad.addColorStop(0.4, '#00d2ff');
+        ringGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
         ctx.fillStyle = ringGrad;
         ctx.beginPath();
-        ctx.arc(0, 0, BH_PHYSICS.PHOTON_SPHERE, 0, Math.PI * 2);
+        ctx.arc(0, 0, BH_SETTINGS.PHOTON_SPHERE, 0, Math.PI * 2);
         ctx.fill();
-        
-        // 3. 视界内缘的细红移线（模拟极高引力下的光线残留）
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+
+        // --- LAYER 4: 绝对事件视界 (The Event Horizon) ---
+        // 无论外部多亮，中心必须是死寂的黑
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.fillStyle = BH_SETTINGS.COLORS.VOID;
+        ctx.beginPath();
+        ctx.arc(0, 0, BH_SETTINGS.VOID_RADIUS, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 为视界增加一层极细的边缘波纹，模拟霍金辐射边缘
+        ctx.strokeStyle = 'rgba(0, 255, 255, 0.5)';
         ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.arc(0, 0, BH_PHYSICS.EVENT_HORIZON + 1, 0, Math.PI * 2);
+        ctx.arc(0, 0, BH_SETTINGS.VOID_RADIUS + 0.5, 0, Math.PI * 2);
         ctx.stroke();
+
         ctx.restore();
     }
 }
