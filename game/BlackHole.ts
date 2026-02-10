@@ -256,7 +256,7 @@ export class BlackHole extends Entity {
             }
             
             // Motion Streaks - Only for inner fast particles
-            if (p.distance < 70) {
+            if (p.distance < 2000) {
                 ctx.strokeStyle = `rgba(${p.color}, ${p.alpha * 0.4})`;
                 ctx.lineWidth = p.size;
                 ctx.beginPath();
