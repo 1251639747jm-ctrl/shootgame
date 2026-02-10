@@ -1,217 +1,295 @@
 import { Entity } from "./Entities";
 import { EntityType } from "../types";
-
-/**
- * ============================================================================================
- * SINGULARITY RADIANCE ENGINE v7.0 - "BEYOND THE LIGHT"
- * ============================================================================================
- * 
- * 核心逻辑：
- * 1. 绝对视界（The Void）：使用渲染层级确保中心点没有任何光线逃逸。
- * 2. 动量梯度（Momentum Gradient）：内圈角速度接近光速，外圈缓慢。
- * 3. 物质流（Accretion Stream）：粒子不是简单的圆周运动，而是带有向心螺旋的切向运动。
- * 4. 磁场偏折（Magnetic Jitter）：模拟高能等离子体在强磁场下的不规则颤动。
- */
-
-const BH_SETTINGS = {
-    RADIUS: 300,                  // 视觉半径
-    VOID_RADIUS: 42,              // 绝对黑体半径
-    PHOTON_SPHERE: 55,            // 光子球层（最亮处）
-    PARTICLE_COUNT: 15000,         // 粒子密度
-    SPIRAL_FACTOR: 0.15,          // 向心螺旋系数
-    MIN_ALPHA: 0.1,
-    MAX_ALPHA: 0.9,
-    COLORS: {
-        HOT: "255, 255, 255",     // 高能区
-        PLASMA: "0, 180, 255",    // 中能区
-        VOID: "#000000"           // 视界
-    }
-};
-
-/**
- * SECTION 1: 高级轨道物理粒子
- */
-class AccretionParticle {
-    public x: number = 0;
-    public y: number = 0;
-    public angle: number;
-    public dist: number;
-    public speed: number;
-    public size: number;
-    public life: number;
-    public color: string;
-    private orbitId: number;
-
-    constructor(maxR: number) {
-        this.orbitId = Math.random();
-        this.reset(maxR, true);
+class BHParticle {
+    angle: number;
+    distance: number;
+    speed: number;
+    size: number;
+    color: string;
+    alpha: number;
+    targetAlpha: number;
+    wobblePhase: number;
+    wobbleSpeed: number;
+    
+    constructor(maxRadius: number) {
+        this.reset(maxRadius, true);
     }
 
-    reset(maxR: number, initial: boolean = false) {
-        // 分层轨道分布逻辑
+    reset(maxRadius: number, startFullAlpha: boolean = false) {
+        // 分布逻辑：降低指数（从3.0降至1.8），使粒子更均匀地分布在广阔的盘面上
         const r = Math.random();
-        this.dist = BH_SETTINGS.VOID_RADIUS + (Math.pow(r, 1.2) * (maxR - BH_SETTINGS.VOID_RADIUS));
+        const distributionCurve = Math.pow(r, 1.8); 
+        
+        const horizonRadius = 45; 
+        const diskWidth = maxRadius - horizonRadius;
+        
+        this.distance = horizonRadius + 5 + (distributionCurve * diskWidth);
         this.angle = Math.random() * Math.PI * 2;
         
-        // 物理角速度：内快外慢
-        this.speed = (600 / Math.sqrt(this.dist)) * 0.5;
-        this.size = 0.5 + Math.random() * 2;
-        this.life = initial ? Math.random() : 1.0;
+        // 角速度逻辑：增加 angularFactor (200 -> 450) 确保外圈也有明显的旋转感
+        const angularFactor = 450; 
+        this.speed = (angularFactor / this.distance) * (0.8 + Math.random() * 0.4);
         
-        // 颜色映射逻辑
-        const distRatio = (this.dist - BH_SETTINGS.VOID_RADIUS) / maxR;
-        if (distRatio < 0.15) {
-            this.color = BH_SETTINGS.COLORS.HOT;
+        // 尺寸：内圈粒子更细碎，模拟高能射线
+        this.size = (Math.random() * 1.6) + (this.distance > 250 ? 1.0 : 0.5);
+        
+        this.wobblePhase = Math.random() * Math.PI * 2;
+        this.wobbleSpeed = Math.random() * 2 + 1;
+
+        // --- 核心：蓝色吸积盘颜色分布优化 ---
+        const distNorm = (this.distance - horizonRadius) / diskWidth;
+        
+        if (distNorm < 0.08) {
+            // 视界边缘：极致白光
+            this.color = '255, 255, 255'; 
+            this.targetAlpha = 0.95 + Math.random() * 0.05;
+        } else if (distNorm < 0.55) {
+            // 蓝色漩涡区：扩大了范围 (从0.25扩到0.55)
+            // 混合使用深天蓝和亮青色
+            this.color = Math.random() > 0.3 ? '50, 180, 255' : '100, 240, 255';
+            this.targetAlpha = 0.8 + Math.random() * 0.2;
+        } else if (distNorm < 0.8) {
+            // 中间过渡带：蓝金交替
+            this.color = Math.random() > 0.7 ? '150, 200, 255' : '200, 180, 100';
+            this.targetAlpha = 0.5 + Math.random() * 0.3;
         } else {
-            this.color = BH_SETTINGS.COLORS.PLASMA;
+            // 边缘区：暗红色散
+            this.color = '180, 60, 40';
+            this.targetAlpha = 0.3 + Math.random() * 0.3;
         }
+        
+        this.alpha = startFullAlpha ? this.targetAlpha : 0;
     }
 
-    update(dt: number, maxR: number) {
-        // 1. 旋转与向心复合运动
-        this.angle += this.speed * dt * 50;
+    update(dt: number, maxRadius: number) {
+        this.angle += this.speed * dt; 
+        this.wobblePhase += this.wobbleSpeed * dt;
         
-        // 螺旋塌缩逻辑：粒子在旋转的同时被吸向中心
-        const radialPull = (BH_SETTINGS.SPIRAL_FACTOR * this.speed * 20);
-        this.dist -= radialPull * dt;
+        // 吸引力物理：离中心越近吸力指数级增强
+        const suction = (1800 / this.distance);
+        this.distance -= suction * dt; 
+        
+        if (this.alpha < this.targetAlpha) {
+            this.alpha += dt * 2.0; 
+        }
 
-        // 2. 更新笛卡尔坐标用于渲染
-        this.x = Math.cos(this.angle) * this.dist;
-        this.y = Math.sin(this.angle) * this.dist;
-
-        // 3. 生命衰减与视界吞噬
-        if (this.dist < BH_SETTINGS.VOID_RADIUS * 0.9) {
-            this.reset(maxR);
+        // 越过事件视界后重生
+        if (this.distance < 40) {
+            this.reset(maxRadius, false);
         }
     }
 }
 
 /**
- * SECTION 2: 黑洞实体
+ * HELPER CLASS: Spacetime Ripple
  */
-export class BlackHole extends Entity {
-    private particles: AccretionParticle[] = [];
-    private lifeTime: number = 0;
-    private maxLife: number = 10.0;
-    private isClosing: boolean = false;
-    private scale: number = 0;
+class SpaceRipple {
+    radius: number;
+    maxRadius: number;
+    life: number;
+    maxLife: number;
 
+    constructor(startRadius: number) {
+        this.radius = startRadius;
+        this.maxRadius = startRadius + 600;
+        this.life = 1.0;
+        this.maxLife = 1.0;
+    }
+
+    update(dt: number) {
+        this.radius += 250 * dt; 
+        this.life -= dt * 0.7;
+    }
+}
+
+export class BlackHole extends Entity {
+    life: number = 10.0; 
+    
+    // --- 扩大半径参数 ---
+    maxRadius: number = 600; 
+    pullRadius: number = 900; 
+    eventHorizonRadius: number = 45;
+    
+    particles: BHParticle[] = [];
+    particleCount: number = 15000; // 增加粒子数量以维持大面积下的密度
+    
+    ripples: SpaceRipple[] = [];
+    rippleTimer: number = 0;
+    
+    spawnInTimer: number = 0;
+    despawnTimer: number = 0;
+    isDespawning: boolean = false;
+    
     constructor(x: number, y: number) {
         super(x, y, EntityType.SKILL_BLACKHOLE);
+        this.radius = 10; 
         
-        // 预分配粒子内存池
-        for (let i = 0; i < BH_SETTINGS.PARTICLE_COUNT; i++) {
-            this.particles.push(new AccretionParticle(BH_SETTINGS.RADIUS));
+        for(let i=0; i<this.particleCount; i++) {
+            this.particles.push(new BHParticle(this.maxRadius));
         }
     }
 
     update(dt: number) {
-        this.lifeTime += dt;
-        
-        // 1. 状态控制逻辑
-        if (!this.isClosing) {
-            // 展开动画
-            this.scale = Math.min(1.0, this.scale + dt * 1.5);
-            if (this.lifeTime > this.maxLife) this.isClosing = true;
+        if (!this.isDespawning) {
+            this.spawnInTimer += dt;
+            if (this.radius < this.maxRadius * 0.7) {
+                this.radius += dt * 200;
+            }
+            
+            this.life -= dt;
+            if (this.life <= 0) {
+                this.isDespawning = true;
+            }
         } else {
-            // 塌缩动画
-            this.scale -= dt * 2.0;
-            if (this.scale <= 0) this.markedForDeletion = true;
+            this.despawnTimer += dt;
+            this.radius -= dt * 300;
+            if (this.despawnTimer > 1.2) {
+                this.markedForDeletion = true;
+            }
         }
-
-        // 2. 粒子物理演算 (Non-Simplified)
+        
+        const currentMaxR = this.isDespawning ? this.maxRadius * (1 - this.despawnTimer) : this.maxRadius;
         for (const p of this.particles) {
-            p.update(dt, BH_SETTINGS.RADIUS);
+            p.update(dt, currentMaxR);
         }
 
-        // 3. 空间微漂移
-        this.position.y -= 8 * dt;
+        this.rippleTimer += dt;
+        if (this.rippleTimer > 0.4 && !this.isDespawning) { 
+            this.rippleTimer = 0;
+            this.ripples.push(new SpaceRipple(this.eventHorizonRadius));
+        }
+        
+        for (let i = this.ripples.length - 1; i >= 0; i--) {
+            const r = this.ripples[i];
+            r.update(dt);
+            if (r.life <= 0) {
+                this.ripples.splice(i, 1);
+            }
+        }
+
+        this.position.y -= 5 * dt; // 缓慢向上漂移
     }
 
-    /**
-     * SECTION 3: 渲染管线
-     * 严格遵循黑洞物理视觉层次
-     */
     static draw(ctx: CanvasRenderingContext2D, bh: BlackHole) {
         const { x, y } = bh.position;
-        if (bh.scale <= 0) return;
+        
+        let scale = 1.0;
+        if (bh.spawnInTimer < 1.0) scale = Math.pow(bh.spawnInTimer, 0.5);
+        if (bh.isDespawning) scale = Math.max(0, 1.2 - bh.despawnTimer);
+        
+        if (scale <= 0.01) return;
 
         ctx.save();
         ctx.translate(x, y);
-        ctx.scale(bh.scale, bh.scale);
+        ctx.scale(scale, scale);
 
-        // --- LAYER 1: 引力透镜边缘 (Lensing Glow) ---
-        // 模拟光线在引力边缘的微弱偏折背景
-        const lensGrad = ctx.createRadialGradient(0, 0, BH_SETTINGS.VOID_RADIUS, 0, 0, BH_SETTINGS.RADIUS);
-        lensGrad.addColorStop(0, 'rgba(0, 0, 0, 1)');
-        lensGrad.addColorStop(0.2, 'rgba(0, 30, 80, 0.4)');
+        // --- LAYER 1: 空间扭曲背景 (引力透镜效果) ---
+        ctx.save();
+        ctx.globalCompositeOperation = 'source-over';
+        const lensRadius = bh.maxRadius * 1.5;
+        const lensGrad = ctx.createRadialGradient(0, 0, bh.eventHorizonRadius, 0, 0, lensRadius);
+        lensGrad.addColorStop(0, '#000000'); 
+        lensGrad.addColorStop(0.3, 'rgba(0, 0, 0, 0.9)');
+        lensGrad.addColorStop(0.7, 'rgba(10, 20, 40, 0.3)');
         lensGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        
         ctx.fillStyle = lensGrad;
         ctx.beginPath();
-        ctx.arc(0, 0, BH_SETTINGS.RADIUS, 0, Math.PI * 2);
+        ctx.arc(0, 0, lensRadius, 0, Math.PI * 2);
         ctx.fill();
-
-        // --- LAYER 2: 吸积盘粒子流 (Accretion Disk) ---
-        // 我们利用混合模式模拟高能等离子体
-        ctx.globalCompositeOperation = 'lighter';
         
-        // 分颜色组渲染以提升性能
-        const colorKeys = [BH_SETTINGS.COLORS.HOT, BH_SETTINGS.COLORS.PLASMA];
-        
-        for (const color of colorKeys) {
+        // 空间涟漪
+        ctx.lineWidth = 2;
+        for (const rip of bh.ripples) {
+            const alpha = rip.life * 0.25;
+            ctx.strokeStyle = `rgba(100, 150, 255, ${alpha})`;
             ctx.beginPath();
-            ctx.strokeStyle = `rgba(${color}, 0.2)`;
-            ctx.fillStyle = `rgb(${color})`;
-            ctx.lineWidth = 1;
-
-            for (const p of bh.particles) {
-                if (p.color !== color) continue;
-
-                // 物理特征：越靠近中心，粒子由于高速运动呈现更明显的“切向拉伸”
-                const stretch = (1.5 - (p.dist / BH_SETTINGS.RADIUS)) * 15;
-                const tx = p.x - Math.sin(p.angle) * stretch;
-                const ty = p.y + Math.cos(p.angle) * stretch;
-
-                // 绘制带运动模糊效果的物质流
-                ctx.moveTo(p.x, p.y);
-                ctx.lineTo(tx, ty);
-                
-                // 绘制高能核心点
-                if (p.orbitId > 0.8) {
-                    ctx.rect(p.x, p.y, p.size, p.size);
-                }
-            }
+            ctx.arc(0, 0, rip.radius, 0, Math.PI * 2);
             ctx.stroke();
-            ctx.fill();
         }
+        ctx.restore();
 
-        // --- LAYER 3: 光子球层 (Photon Sphere) ---
-        // 这是事件视界外最后一层肉眼可见的极亮环
+        // --- LAYER 2: 核心蓝色吸积盘 ---
+        ctx.save();
         ctx.globalCompositeOperation = 'lighter';
-        const ringGrad = ctx.createRadialGradient(0, 0, BH_SETTINGS.VOID_RADIUS, 0, 0, BH_SETTINGS.PHOTON_SPHERE);
-        ringGrad.addColorStop(0, '#ffffff');
-        ringGrad.addColorStop(0.4, '#00d2ff');
-        ringGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
-        ctx.fillStyle = ringGrad;
+        
+        // 底层的环境光
+        const baseGlow = ctx.createRadialGradient(0, 0, bh.eventHorizonRadius, 0, 0, bh.maxRadius);
+        baseGlow.addColorStop(0, 'rgba(0, 80, 255, 0.3)');
+        baseGlow.addColorStop(0.5, 'rgba(0, 20, 100, 0.1)');
+        baseGlow.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = baseGlow;
         ctx.beginPath();
-        ctx.arc(0, 0, BH_SETTINGS.PHOTON_SPHERE, 0, Math.PI * 2);
+        ctx.arc(0, 0, bh.maxRadius, 0, Math.PI*2);
         ctx.fill();
 
-        // --- LAYER 4: 绝对事件视界 (The Event Horizon) ---
-        // 无论外部多亮，中心必须是死寂的黑
+        for (const p of bh.particles) {
+            if (p.alpha <= 0.05) continue;
+
+            const xPos = Math.cos(p.angle) * p.distance;
+            const yPos = Math.sin(p.angle) * p.distance;
+
+            ctx.fillStyle = `rgba(${p.color}, ${p.alpha})`;
+            
+            // 优化：根据粒子大小选择绘制方式
+            if (p.size < 1.8) {
+                ctx.fillRect(xPos, yPos, p.size, p.size);
+            } else {
+                ctx.beginPath();
+                ctx.arc(xPos, yPos, p.size, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            
+            // --- 关键：扩大后的旋转纹理线 ---
+            // 将判定范围从 70 扩大到 350
+            if (p.distance < 350) {
+                const trailAlpha = p.alpha * (1 - (p.distance / 350)) * 0.5;
+                ctx.strokeStyle = `rgba(${p.color}, ${trailAlpha})`;
+                ctx.lineWidth = p.size * 0.8;
+                ctx.beginPath();
+                ctx.moveTo(xPos, yPos);
+                
+                // 增加拖尾长度随旋转速度变化的逻辑
+                const trailLen = (300 / p.distance) * 10; 
+                const tx = xPos - Math.sin(p.angle) * trailLen; 
+                const ty = yPos + Math.cos(p.angle) * trailLen;
+                
+                ctx.lineTo(tx, ty);
+                ctx.stroke();
+            }
+        }
+        ctx.restore();
+
+        // --- LAYER 3: 事件视界 (中心黑体) ---
+        ctx.save();
         ctx.globalCompositeOperation = 'source-over';
-        ctx.fillStyle = BH_SETTINGS.COLORS.VOID;
+        
+        // 黑洞中心
+        ctx.fillStyle = '#000000';
+        ctx.shadowColor = '#0066ff';
+        ctx.shadowBlur = 20; 
         ctx.beginPath();
-        ctx.arc(0, 0, BH_SETTINGS.VOID_RADIUS, 0, Math.PI * 2);
+        ctx.arc(0, 0, bh.eventHorizonRadius, 0, Math.PI * 2);
         ctx.fill();
-
-        // 为视界增加一层极细的边缘波纹，模拟霍金辐射边缘
-        ctx.strokeStyle = 'rgba(0, 255, 255, 0.5)';
-        ctx.lineWidth = 1;
+        
+        // 视界边缘的强光环 (Photon Ring)
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.shadowBlur = 0;
+        
+        // 蓝色外发光
+        ctx.strokeStyle = '#0ea5e9';
+        ctx.lineWidth = 4;
         ctx.beginPath();
-        ctx.arc(0, 0, BH_SETTINGS.VOID_RADIUS + 0.5, 0, Math.PI * 2);
+        ctx.arc(0, 0, bh.eventHorizonRadius + 1, 0, Math.PI * 2);
         ctx.stroke();
-
+        
+        // 内部极细白环
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(0, 0, bh.eventHorizonRadius - 1, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
         ctx.restore();
     }
 }
