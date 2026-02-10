@@ -17,7 +17,7 @@ const BH_SETTINGS = {
     RADIUS: 300,                  // 视觉半径
     VOID_RADIUS: 42,              // 绝对黑体半径
     PHOTON_SPHERE: 55,            // 光子球层（最亮处）
-    PARTICLE_COUNT: 3500,         // 粒子密度
+    PARTICLE_COUNT: 15000,         // 粒子密度
     SPIRAL_FACTOR: 0.15,          // 向心螺旋系数
     MIN_ALPHA: 0.1,
     MAX_ALPHA: 0.9,
