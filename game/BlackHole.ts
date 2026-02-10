@@ -2,7 +2,8 @@ import { Entity } from "./Entities";
 import { EntityType } from "../types";
 
 /**
- * 极致密度粒子：通过长线段模拟连续的等离子体流
+ * HELPER CLASS: Black Hole Particle
+ * 经过优化的黑洞粒子，支持更大的半径和更广的颜色分布
  */
 class BHParticle {
     angle: number;
@@ -12,7 +13,6 @@ class BHParticle {
     color: string;
     alpha: number;
     targetAlpha: number;
-    // 保留扰动，增加细节
     wobblePhase: number;
     wobbleSpeed: number;
     
@@ -21,33 +21,48 @@ class BHParticle {
     }
 
     reset(maxRadius: number, startFullAlpha: boolean = false) {
+        // 分布逻辑：降低指数（从3.0降至1.8），使粒子更均匀地分布在广阔的盘面上
         const r = Math.random();
-        // 极致分布：2.5 的指数让物质高度集中在视界周围，形成厚实的内盘
-        const distributionCurve = Math.pow(r, 2.5); 
+        const distributionCurve = Math.pow(r, 1.8); 
         
         const horizonRadius = 45; 
         const diskWidth = maxRadius - horizonRadius;
         
-        this.distance = horizonRadius + 2 + (distributionCurve * diskWidth);
+        this.distance = horizonRadius + 5 + (distributionCurve * diskWidth);
         this.angle = Math.random() * Math.PI * 2;
         
-        // 高速旋转：保底转速 + 幂律衰减
-        const innerStrength = 150; 
-        const baseRotation = 1.5; 
-        this.speed = (innerStrength / Math.pow(this.distance, 0.6)) + baseRotation;
-        this.speed *= (0.85 + Math.random() * 0.3);
+        // 角速度逻辑：增加 angularFactor (200 -> 450) 确保外圈也有明显的旋转感
+        const angularFactor = 450; 
+        this.speed = (angularFactor / this.distance) * (0.8 + Math.random() * 0.4);
         
-        this.size = Math.random() * 1.5 + 0.5;
+        // 尺寸：内圈粒子更细碎，模拟高能射线
+        this.size = (Math.random() * 1.6) + (this.distance > 250 ? 1.0 : 0.5);
+        
         this.wobblePhase = Math.random() * Math.PI * 2;
-        this.wobbleSpeed = Math.random() * 2;
+        this.wobbleSpeed = Math.random() * 2 + 1;
 
-        // 全蓝色系：高能电荷蓝
-        const bluePool = ['80, 180, 255', '150, 220, 255', '40, 100, 255'];
-        this.color = bluePool[Math.floor(Math.random() * bluePool.length)];
-        
-        // 边缘粒子更透明，内圈粒子更浓厚
+        // --- 核心：蓝色吸积盘颜色分布优化 ---
         const distNorm = (this.distance - horizonRadius) / diskWidth;
-        this.targetAlpha = (1.0 - distNorm * 0.8) * (0.5 + Math.random() * 0.5);
+        
+        if (distNorm < 0.08) {
+            // 视界边缘：极致白光
+            this.color = '255, 255, 255'; 
+            this.targetAlpha = 0.95 + Math.random() * 0.05;
+        } else if (distNorm < 0.55) {
+            // 蓝色漩涡区：扩大了范围 (从0.25扩到0.55)
+            // 混合使用深天蓝和亮青色
+            this.color = Math.random() > 0.3 ? '50, 180, 255' : '100, 240, 255';
+            this.targetAlpha = 0.8 + Math.random() * 0.2;
+        } else if (distNorm < 0.8) {
+            // 中间过渡带：蓝金交替
+            this.color = Math.random() > 0.7 ? '150, 200, 255' : '200, 180, 100';
+            this.targetAlpha = 0.5 + Math.random() * 0.3;
+        } else {
+            // 边缘区：暗红色散
+            this.color = '180, 60, 40';
+            this.targetAlpha = 0.3 + Math.random() * 0.3;
+        }
+        
         this.alpha = startFullAlpha ? this.targetAlpha : 0;
     }
 
@@ -55,46 +70,53 @@ class BHParticle {
         this.angle += this.speed * dt; 
         this.wobblePhase += this.wobbleSpeed * dt;
         
-        // 强力向心坍缩
-        const suction = (2200 / this.distance);
+        // 吸引力物理：离中心越近吸力指数级增强
+        const suction = (1800 / this.distance);
         this.distance -= suction * dt; 
         
         if (this.alpha < this.targetAlpha) {
             this.alpha += dt * 2.0; 
         }
 
-        if (this.distance < 44) {
+        // 越过事件视界后重生
+        if (this.distance < 40) {
             this.reset(maxRadius, false);
         }
     }
 }
 
 /**
- * 空间涟漪效果（保留）
+ * HELPER CLASS: Spacetime Ripple
  */
 class SpaceRipple {
     radius: number;
     maxRadius: number;
     life: number;
+    maxLife: number;
+
     constructor(startRadius: number) {
         this.radius = startRadius;
         this.maxRadius = startRadius + 600;
         this.life = 1.0;
+        this.maxLife = 1.0;
     }
+
     update(dt: number) {
-        this.radius += 300 * dt; 
+        this.radius += 250 * dt; 
         this.life -= dt * 0.7;
     }
 }
 
 export class BlackHole extends Entity {
-    // --- 完整状态系统 ---
     life: number = 10.0; 
+    
+    // --- 扩大半径参数 ---
     maxRadius: number = 600; 
-    eventHorizonRadius: number = 48;
+    pullRadius: number = 900; 
+    eventHorizonRadius: number = 45;
     
     particles: BHParticle[] = [];
-    particleCount: number = 18000; // 极致密度
+    particleCount: number = 15000; // 增加粒子数量以维持大面积下的密度
     
     ripples: SpaceRipple[] = [];
     rippleTimer: number = 0;
@@ -106,22 +128,29 @@ export class BlackHole extends Entity {
     constructor(x: number, y: number) {
         super(x, y, EntityType.SKILL_BLACKHOLE);
         this.radius = 10; 
+        
         for(let i=0; i<this.particleCount; i++) {
             this.particles.push(new BHParticle(this.maxRadius));
         }
     }
 
     update(dt: number) {
-        // --- 完整生命周期逻辑 ---
         if (!this.isDespawning) {
             this.spawnInTimer += dt;
-            if (this.radius < this.maxRadius * 0.7) this.radius += dt * 200;
+            if (this.radius < this.maxRadius * 0.7) {
+                this.radius += dt * 200;
+            }
+            
             this.life -= dt;
-            if (this.life <= 0) this.isDespawning = true;
+            if (this.life <= 0) {
+                this.isDespawning = true;
+            }
         } else {
             this.despawnTimer += dt;
             this.radius -= dt * 300;
-            if (this.despawnTimer > 1.2) this.markedForDeletion = true;
+            if (this.despawnTimer > 1.2) {
+                this.markedForDeletion = true;
+            }
         }
         
         const currentMaxR = this.isDespawning ? this.maxRadius * (1 - this.despawnTimer) : this.maxRadius;
@@ -129,18 +158,21 @@ export class BlackHole extends Entity {
             p.update(dt, currentMaxR);
         }
 
-        // 涟漪逻辑
         this.rippleTimer += dt;
         if (this.rippleTimer > 0.4 && !this.isDespawning) { 
             this.rippleTimer = 0;
             this.ripples.push(new SpaceRipple(this.eventHorizonRadius));
         }
+        
         for (let i = this.ripples.length - 1; i >= 0; i--) {
-            this.ripples[i].update(dt);
-            if (this.ripples[i].life <= 0) this.ripples.splice(i, 1);
+            const r = this.ripples[i];
+            r.update(dt);
+            if (r.life <= 0) {
+                this.ripples.splice(i, 1);
+            }
         }
 
-        this.position.y -= 5 * dt; // 缓慢漂移
+        this.position.y -= 5 * dt; // 缓慢向上漂移
     }
 
     static draw(ctx: CanvasRenderingContext2D, bh: BlackHole) {
@@ -149,86 +181,114 @@ export class BlackHole extends Entity {
         let scale = 1.0;
         if (bh.spawnInTimer < 1.0) scale = Math.pow(bh.spawnInTimer, 0.5);
         if (bh.isDespawning) scale = Math.max(0, 1.2 - bh.despawnTimer);
+        
         if (scale <= 0.01) return;
 
         ctx.save();
         ctx.translate(x, y);
         ctx.scale(scale, scale);
 
-        // --- LAYER 1: 空间背景 & 涟漪 ---
+        // --- LAYER 1: 空间扭曲背景 (引力透镜效果) ---
         ctx.save();
+        ctx.globalCompositeOperation = 'source-over';
         const lensRadius = bh.maxRadius * 1.5;
         const lensGrad = ctx.createRadialGradient(0, 0, bh.eventHorizonRadius, 0, 0, lensRadius);
         lensGrad.addColorStop(0, '#000000'); 
-        lensGrad.addColorStop(0.3, 'rgba(0, 10, 35, 0.95)');
+        lensGrad.addColorStop(0.3, 'rgba(0, 0, 0, 0.9)');
+        lensGrad.addColorStop(0.7, 'rgba(10, 20, 40, 0.3)');
         lensGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        
         ctx.fillStyle = lensGrad;
         ctx.beginPath();
         ctx.arc(0, 0, lensRadius, 0, Math.PI * 2);
         ctx.fill();
         
+        // 空间涟漪
+        ctx.lineWidth = 2;
         for (const rip of bh.ripples) {
-            ctx.strokeStyle = `rgba(100, 160, 255, ${rip.life * 0.2})`;
-            ctx.lineWidth = 2;
+            const alpha = rip.life * 0.25;
+            ctx.strokeStyle = `rgba(100, 150, 255, ${alpha})`;
             ctx.beginPath();
             ctx.arc(0, 0, rip.radius, 0, Math.PI * 2);
             ctx.stroke();
         }
         ctx.restore();
 
-        // --- LAYER 2: 极致密度等离子体 ---
+        // --- LAYER 2: 核心蓝色吸积盘 ---
         ctx.save();
         ctx.globalCompositeOperation = 'lighter';
         
-        for (let i = 0; i < bh.particles.length; i++) {
-            const p = bh.particles[i];
+        // 底层的环境光
+        const baseGlow = ctx.createRadialGradient(0, 0, bh.eventHorizonRadius, 0, 0, bh.maxRadius);
+        baseGlow.addColorStop(0, 'rgba(0, 80, 255, 0.3)');
+        baseGlow.addColorStop(0.5, 'rgba(0, 20, 100, 0.1)');
+        baseGlow.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = baseGlow;
+        ctx.beginPath();
+        ctx.arc(0, 0, bh.maxRadius, 0, Math.PI*2);
+        ctx.fill();
+
+        for (const p of bh.particles) {
             if (p.alpha <= 0.05) continue;
 
             const xPos = Math.cos(p.angle) * p.distance;
             const yPos = Math.sin(p.angle) * p.distance;
 
-            // 多普勒效应：模拟一侧更亮
-            const cos = Math.cos(p.angle);
-            const sideBrightness = 0.5 + (cos < 0 ? Math.abs(cos) * 0.7 : 0);
-
-            ctx.strokeStyle = `rgba(${p.color}, ${p.alpha * sideBrightness})`;
-            ctx.lineWidth = p.size;
+            ctx.fillStyle = `rgba(${p.color}, ${p.alpha})`;
             
-            // 绘制极长连线，消除粒子感
-            const lineLen = p.speed * p.distance * 0.08; 
+            // 优化：根据粒子大小选择绘制方式
+            if (p.size < 1.8) {
+                ctx.fillRect(xPos, yPos, p.size, p.size);
+            } else {
+                ctx.beginPath();
+                ctx.arc(xPos, yPos, p.size, 0, Math.PI * 2);
+                ctx.fill();
+            }
             
-            ctx.beginPath();
-            ctx.moveTo(xPos, yPos);
-            const tx = xPos - Math.sin(p.angle) * lineLen; 
-            const ty = yPos + Math.cos(p.angle) * lineLen;
-            ctx.lineTo(tx, ty);
-            ctx.stroke();
-            
-            // 增加少量核心亮点，增加“碎屑”质感
-            if (i % 20 === 0) {
-                ctx.fillStyle = `rgba(255, 255, 255, ${p.alpha * 0.3})`;
-                ctx.fillRect(xPos, yPos, 1, 1);
+            // --- 关键：扩大后的旋转纹理线 ---
+            // 将判定范围从 70 扩大到 350
+            if (p.distance < 350) {
+                const trailAlpha = p.alpha * (1 - (p.distance / 350)) * 0.5;
+                ctx.strokeStyle = `rgba(${p.color}, ${trailAlpha})`;
+                ctx.lineWidth = p.size * 0.8;
+                ctx.beginPath();
+                ctx.moveTo(xPos, yPos);
+                
+                // 增加拖尾长度随旋转速度变化的逻辑
+                const trailLen = (300 / p.distance) * 10; 
+                const tx = xPos - Math.sin(p.angle) * trailLen; 
+                const ty = yPos + Math.cos(p.angle) * trailLen;
+                
+                ctx.lineTo(tx, ty);
+                ctx.stroke();
             }
         }
         ctx.restore();
 
-        // --- LAYER 3: 事件视界 & 光子环 ---
+        // --- LAYER 3: 事件视界 (中心黑体) ---
         ctx.save();
+        ctx.globalCompositeOperation = 'source-over';
+        
+        // 黑洞中心
         ctx.fillStyle = '#000000';
-        ctx.shadowColor = '#0088ff';
-        ctx.shadowBlur = 30; 
+        ctx.shadowColor = '#0066ff';
+        ctx.shadowBlur = 20; 
         ctx.beginPath();
         ctx.arc(0, 0, bh.eventHorizonRadius, 0, Math.PI * 2);
         ctx.fill();
         
+        // 视界边缘的强光环 (Photon Ring)
         ctx.globalCompositeOperation = 'lighter';
         ctx.shadowBlur = 0;
-        ctx.strokeStyle = 'rgba(14, 165, 233, 0.9)';
+        
+        // 蓝色外发光
+        ctx.strokeStyle = '#0ea5e9';
         ctx.lineWidth = 4;
         ctx.beginPath();
         ctx.arc(0, 0, bh.eventHorizonRadius + 1, 0, Math.PI * 2);
         ctx.stroke();
         
+        // 内部极细白环
         ctx.strokeStyle = '#ffffff';
         ctx.lineWidth = 1.5;
         ctx.beginPath();
@@ -236,6 +296,7 @@ export class BlackHole extends Entity {
         ctx.stroke();
 
         ctx.restore();
+
         ctx.restore();
     }
 }
