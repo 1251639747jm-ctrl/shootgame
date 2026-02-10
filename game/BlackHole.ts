@@ -31,8 +31,8 @@ class BHParticle {
         this.distance = horizonRadius + 5 + (distributionCurve * diskWidth);
         this.angle = Math.random() * Math.PI * 2;
         
-        // 角速度逻辑：增加 angularFactor (200 -> 450) 确保外圈也有明显的旋转感
-        const angularFactor = 450; 
+        // 角速度逻辑：增加  (200 -> 450) 确保外圈也有明显的旋转感
+        const angularFactor = 4500; 
         this.speed = (angularFactor / this.distance) * (0.8 + Math.random() * 0.4);
         
         // 尺寸：内圈粒子更细碎，模拟高能射线
