@@ -2,299 +2,229 @@ import { Enemy } from "./Entities";
 import { EntityType } from "../types";
 
 export class EnemyModel {
-  static draw(ctx: CanvasRenderingContext2D, enemy: Enemy) {
-    const { x, y } = enemy.position;
-    
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.rotate(enemy.rotation);
-    ctx.globalCompositeOperation = 'source-over';
+    static draw(ctx: CanvasRenderingContext2D, enemy: Enemy) {
+        const { x, y } = enemy.position;
+        const time = performance.now() / 1000;
+        
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(enemy.rotation);
 
-    switch (enemy.type) {
-        case EntityType.ENEMY_BASIC:
-            EnemyModel.drawBasic(ctx);
-            break;
-        case EntityType.ENEMY_FAST:
-            EnemyModel.drawFast(ctx);
-            break;
-        case EntityType.ENEMY_TANK:
-            EnemyModel.drawTank(ctx);
-            break;
-        case EntityType.ENEMY_KAMIKAZE:
-            EnemyModel.drawKamikaze(ctx);
-            break;
-        case EntityType.ENEMY_BOSS:
-            EnemyModel.drawBoss(ctx, enemy);
-            break;
+        // 根据机型调用极致渲染函数
+        switch (enemy.type) {
+            case EntityType.ENEMY_BASIC:
+                this.renderBasic(ctx, time);
+                break;
+            case EntityType.ENEMY_FAST:
+                this.renderFast(ctx, time);
+                break;
+            case EntityType.ENEMY_TANK:
+                this.renderTank(ctx, time);
+                break;
+            case EntityType.ENEMY_KAMIKAZE:
+                this.renderKamikaze(ctx, time);
+                break;
+            case EntityType.ENEMY_BOSS:
+                this.renderBoss(ctx, enemy, time);
+                break;
+        }
+
+        ctx.restore();
     }
 
-    ctx.restore();
-  }
+    /**
+     * 1. 基础侦察机 (紫色蜂群) - 强化悬浮感
+     */
+    private static renderBasic(ctx: CanvasRenderingContext2D, t: number) {
+        const flicker = Math.sin(t * 15) * 0.2 + 0.8;
+        
+        // 双引擎尾焰 (无 ShadowBlur 发光方案)
+        ctx.globalCompositeOperation = 'lighter';
+        this.drawEngineGlow(ctx, -8, 14, 6 * flicker, '#a855f7');
+        this.drawEngineGlow(ctx, 8, 14, 6 * flicker, '#a855f7');
+        ctx.globalCompositeOperation = 'source-over';
 
-  // --- 1. BASIC ENEMY (PURPLE DRONE) ---
-  private static drawBasic(ctx: CanvasRenderingContext2D) {
-      const s = 1.0;
-      
-      // Rear Engine Glow
-      ctx.save();
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.fillStyle = '#a855f7';
-      ctx.shadowColor = '#d8b4fe';
-      ctx.shadowBlur = 10;
-      ctx.beginPath();
-      ctx.arc(-8, 15, 3, 0, Math.PI*2);
-      ctx.arc(8, 15, 3, 0, Math.PI*2);
-      ctx.fill();
-      ctx.restore();
+        // 主机壳：复合装甲色
+        const g = ctx.createLinearGradient(-15, 0, 15, 0);
+        g.addColorStop(0, '#1e1b4b');
+        g.addColorStop(0.5, '#4c1d95');
+        g.addColorStop(1, '#1e1b4b');
+        ctx.fillStyle = g;
+        ctx.strokeStyle = '#7c3aed';
+        ctx.lineWidth = 1.5;
 
-      // Main Hull Gradient
-      const grad = ctx.createLinearGradient(-15, 0, 15, 0);
-      grad.addColorStop(0, '#1e1b4b'); // Dark Indigo
-      grad.addColorStop(0.5, '#4c1d95'); // Violet Highlight
-      grad.addColorStop(1, '#1e1b4b'); 
+        ctx.beginPath();
+        ctx.moveTo(0, -22); ctx.lineTo(18, 5); ctx.lineTo(12, 18);
+        ctx.lineTo(0, 12); ctx.lineTo(-12, 18); ctx.lineTo(-18, 5);
+        ctx.closePath();
+        ctx.fill(); ctx.stroke();
 
-      ctx.fillStyle = grad;
-      ctx.strokeStyle = '#7c3aed';
-      ctx.lineWidth = 1;
+        // 传感器“核心”
+        ctx.fillStyle = '#000';
+        ctx.beginPath(); ctx.arc(0, -2, 5, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = `rgba(216, 180, 254, ${flicker})`;
+        ctx.beginPath(); ctx.arc(0, -2, 2, 0, Math.PI*2); ctx.fill();
+    }
 
-      // Shape: Arrowhead with forward prongs
-      ctx.beginPath();
-      ctx.moveTo(0, -25); // Nose
-      ctx.lineTo(6, -10);
-      ctx.lineTo(22, 5);  // Wing
-      ctx.lineTo(15, 20); // Rear Side
-      ctx.lineTo(0, 15);  // Rear Center
-      ctx.lineTo(-15, 20);
-      ctx.lineTo(-22, 5);
-      ctx.lineTo(-6, -10);
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
+    /**
+     * 2. 快速拦截机 (青色闪电) - 强化流线型与速度感
+     */
+    private static renderFast(ctx: CanvasRenderingContext2D, t: number) {
+        const pulse = Math.sin(t * 25) * 0.3 + 0.7;
+        
+        // 极长束能尾焰
+        ctx.globalCompositeOperation = 'lighter';
+        this.drawEngineGlow(ctx, 0, 20, 12 * pulse, '#22d3ee');
+        ctx.globalCompositeOperation = 'source-over';
 
-      // Mechanical Panel Lines
-      ctx.strokeStyle = 'rgba(255,255,255,0.2)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(-6, -10); ctx.lineTo(6, -10); // Crossbar
-      ctx.moveTo(0, -10); ctx.lineTo(0, 15);   // Spine
-      ctx.stroke();
+        // 针式船体
+        ctx.fillStyle = '#0f172a';
+        ctx.strokeStyle = '#06b6d4';
+        ctx.lineWidth = 1;
 
-      // Central Eye (Sensor)
-      ctx.fillStyle = '#000000';
-      ctx.beginPath(); ctx.arc(0, -5, 4, 0, Math.PI*2); ctx.fill();
-      // Glowing pupil
-      ctx.fillStyle = '#f0abfc';
-      ctx.shadowColor = '#e879f9'; ctx.shadowBlur = 8;
-      ctx.beginPath(); ctx.arc(0, -5, 2, 0, Math.PI*2); ctx.fill();
-      ctx.shadowBlur = 0;
-  }
+        ctx.beginPath();
+        ctx.moveTo(0, -32); ctx.lineTo(6, -10); ctx.lineTo(24, 12);
+        ctx.lineTo(0, 18); ctx.lineTo(-24, 12); ctx.lineTo(-6, -10);
+        ctx.closePath();
+        ctx.fill(); ctx.stroke();
 
-  // --- 2. FAST ENEMY (CYAN INTERCEPTOR) ---
-  private static drawFast(ctx: CanvasRenderingContext2D) {
-      const s = 1.1;
+        // 能量刻线
+        ctx.strokeStyle = 'rgba(34, 211, 238, 0.5)';
+        ctx.beginPath();
+        ctx.moveTo(-4, -5); ctx.lineTo(-18, 8);
+        ctx.moveTo(4, -5); ctx.lineTo(18, 8);
+        ctx.stroke();
+    }
 
-      // Single Central Engine
-      ctx.save();
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.fillStyle = '#22d3ee';
-      ctx.shadowBlur = 15;
-      ctx.shadowColor = '#22d3ee';
-      ctx.beginPath();
-      ctx.moveTo(-4, 25); ctx.lineTo(0, 45); ctx.lineTo(4, 25);
-      ctx.fill();
-      ctx.restore();
+    /**
+     * 3. 重型坦克 (橙色要塞) - 强化厚重感与工业磨损
+     */
+    private static renderTank(ctx: CanvasRenderingContext2D, t: number) {
+        // 四座重型发动机
+        ctx.globalCompositeOperation = 'lighter';
+        [-20, -10, 10, 20].forEach(x => this.drawEngineGlow(ctx, x, 28, 8, '#f97316'));
+        ctx.globalCompositeOperation = 'source-over';
 
-      const grad = ctx.createLinearGradient(0, -20, 0, 20);
-      grad.addColorStop(0, '#0f172a');
-      grad.addColorStop(0.5, '#0e7490'); // Cyan Dark
-      grad.addColorStop(1, '#0f172a');
+        // 宽体飞翼布局
+        const g = ctx.createLinearGradient(-40, 0, 40, 0);
+        g.addColorStop(0, '#270a05');
+        g.addColorStop(0.5, '#7c2d12');
+        g.addColorStop(1, '#270a05');
+        ctx.fillStyle = g;
+        ctx.strokeStyle = '#ea580c';
+        ctx.lineWidth = 2.5;
 
-      ctx.fillStyle = grad;
-      ctx.strokeStyle = '#06b6d4';
-      ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(0, -25); ctx.lineTo(42, 5); ctx.lineTo(42, 28);
+        ctx.lineTo(-42, 28); ctx.lineTo(-42, 5);
+        ctx.closePath();
+        ctx.fill(); ctx.stroke();
 
-      // Shape: Forward swept wings, needle-like
-      ctx.beginPath();
-      ctx.moveTo(0, -35); // Long nose
-      ctx.lineTo(5, -15);
-      ctx.lineTo(25, 10); // Wing tip forward
-      ctx.lineTo(8, 25);  // Rear fuselage
-      ctx.lineTo(0, 20);  // Exhaust
-      ctx.lineTo(-8, 25);
-      ctx.lineTo(-25, 10);
-      ctx.lineTo(-5, -15);
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
+        // 顶层防御塔底座
+        ctx.fillStyle = '#18181b';
+        ctx.beginPath(); ctx.arc(0, 5, 12, 0, Math.PI*2); ctx.fill();
+        ctx.stroke();
+        
+        // 炮管细节
+        ctx.strokeStyle = '#9a3412';
+        ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.moveTo(0, 5); ctx.lineTo(0, 38); ctx.stroke();
+    }
 
-      // Canards (Front control surfaces)
-      ctx.fillStyle = '#155e75';
-      ctx.beginPath();
-      ctx.moveTo(5, -15); ctx.lineTo(12, -20); ctx.lineTo(5, -10);
-      ctx.moveTo(-5, -15); ctx.lineTo(-12, -20); ctx.lineTo(-5, -10);
-      ctx.fill();
-      ctx.stroke();
+    /**
+     * 4. 自爆死士 (红色尖刺) - 极高频闪烁警告
+     */
+    private static renderKamikaze(ctx: CanvasRenderingContext2D, t: number) {
+        const alert = Math.sin(t * 40) > 0;
+        
+        // 危险的红色能量外溢
+        ctx.globalCompositeOperation = 'lighter';
+        const glowR = alert ? 35 : 20;
+        const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, glowR);
+        grad.addColorStop(0, 'rgba(239, 68, 68, 0.4)');
+        grad.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath(); ctx.arc(0, 0, glowR, 0, Math.PI*2); ctx.fill();
+        ctx.globalCompositeOperation = 'source-over';
 
-      // Cockpit Strip
-      ctx.fillStyle = '#ccfbf1';
-      ctx.beginPath();
-      ctx.moveTo(0, -20); ctx.lineTo(2, -10); ctx.lineTo(-2, -10);
-      ctx.fill();
-  }
+        // 尖刺造型
+        ctx.fillStyle = alert ? '#f87171' : '#7f1d1d';
+        ctx.strokeStyle = '#fee2e2';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(0, -30); ctx.lineTo(12, 10); ctx.lineTo(0, 4); ctx.lineTo(-12, 10);
+        ctx.closePath();
+        ctx.fill(); ctx.stroke();
+    }
 
-  // --- 3. TANK ENEMY (ORANGE BOMBER) ---
-  private static drawTank(ctx: CanvasRenderingContext2D) {
-      const grad = ctx.createLinearGradient(-25, -25, 25, 25);
-      grad.addColorStop(0, '#270a05'); // Dark Brown
-      grad.addColorStop(0.5, '#7c2d12'); // Rust
-      grad.addColorStop(1, '#270a05');
+    /**
+     * 5. BOSS 旗舰 (歼星级巨舰) - 多层细节与核能反应堆
+     */
+    private static renderBoss(ctx: CanvasRenderingContext2D, enemy: Enemy, t: number) {
+        const s = 1.8;
+        const hpRatio = enemy.health / enemy.maxHealth;
 
-      // Four Heavy Engines
-      ctx.fillStyle = '#f97316';
-      ctx.shadowBlur = 8;
-      ctx.shadowColor = '#fdba74';
-      [-20, -10, 10, 20].forEach(x => {
-          ctx.fillRect(x-3, 25, 6, 6);
-      });
-      ctx.shadowBlur = 0;
+        // 引擎矩阵 (六座重型推进器)
+        ctx.globalCompositeOperation = 'lighter';
+        [-40, -25, -10, 10, 25, 40].forEach(x => {
+            this.drawEngineGlow(ctx, x*s, 40*s, 15*s, hpRatio < 0.3 ? '#facc15' : '#ef4444');
+        });
 
-      ctx.fillStyle = grad;
-      ctx.strokeStyle = '#c2410c';
-      ctx.lineWidth = 2;
+        // 主体框架：金属质感
+        const g = ctx.createLinearGradient(-80, 0, 80, 0);
+        g.addColorStop(0, '#09090b');
+        g.addColorStop(0.5, '#27272a');
+        g.addColorStop(1, '#09090b');
+        ctx.fillStyle = g;
+        ctx.strokeStyle = '#ef4444';
+        ctx.lineWidth = 4;
 
-      // Shape: Flying Wing / Fortress
-      ctx.beginPath();
-      ctx.moveTo(0, -30);
-      ctx.lineTo(15, -20);
-      ctx.lineTo(40, 0);  // Wide Wing Start
-      ctx.lineTo(40, 25); // Squared off wingtip
-      ctx.lineTo(10, 35); // Rear body
-      ctx.lineTo(-10, 35);
-      ctx.lineTo(-40, 25);
-      ctx.lineTo(-40, 0);
-      ctx.lineTo(-15, -20);
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(0, -75*s); 
+        ctx.lineTo(35*s, -45*s); ctx.lineTo(80*s, 10*s); 
+        ctx.lineTo(50*s, 55*s); ctx.lineTo(-50*s, 55*s);
+        ctx.lineTo(-80*s, 10*s); ctx.lineTo(-35*s, -45*s);
+        ctx.closePath();
+        ctx.fill(); ctx.stroke();
 
-      // Heavy Armor Plating (Rectangles)
-      ctx.fillStyle = 'rgba(0,0,0,0.4)';
-      ctx.fillRect(-10, -10, 20, 30); // Central block
-      ctx.strokeRect(-10, -10, 20, 30);
-      
-      ctx.fillRect(-35, 5, 10, 15); // Left wing plate
-      ctx.fillRect(25, 5, 10, 15); // Right wing plate
+        // 表面装甲分缝（科技感细节）
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([10, 5]);
+        ctx.beginPath();
+        ctx.moveTo(-30*s, -20*s); ctx.lineTo(30*s, -20*s);
+        ctx.moveTo(-50*s, 10*s); ctx.lineTo(50*s, 10*s);
+        ctx.stroke();
+        ctx.setLineDash([]);
 
-      // Turret
-      ctx.fillStyle = '#18181b';
-      ctx.beginPath(); ctx.arc(0, 0, 10, 0, Math.PI*2); ctx.fill();
-      // Barrel
-      ctx.strokeStyle = '#ea580c';
-      ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(0, 40); ctx.stroke();
-  }
+        // 核心能量炉 (Reactor) - 随生命值改变颜色
+        const pulse = 1 + Math.sin(t * 10) * 0.15;
+        const reactorColor = hpRatio > 0.4 ? 'rgba(239, 68, 68, 0.8)' : 'rgba(250, 204, 21, 0.8)';
+        
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        const rGrad = ctx.createRadialGradient(0, -10, 0, 0, -10, 20*s*pulse);
+        rGrad.addColorStop(0, '#fff');
+        rGrad.addColorStop(0.5, reactorColor);
+        rGrad.addColorStop(1, 'transparent');
+        ctx.fillStyle = rGrad;
+        ctx.beginPath(); ctx.arc(0, -10, 20*s*pulse, 0, Math.PI*2); ctx.fill();
+        ctx.restore();
+    }
 
-  // --- 4. KAMIKAZE ENEMY (RED SPIKE) ---
-  private static drawKamikaze(ctx: CanvasRenderingContext2D) {
-      const grad = ctx.createLinearGradient(-10, 0, 10, 0);
-      grad.addColorStop(0, '#450a0a');
-      grad.addColorStop(0.5, '#dc2626');
-      grad.addColorStop(1, '#450a0a');
-
-      ctx.save();
-      // Entire body glows dangerously
-      ctx.shadowColor = '#ef4444';
-      ctx.shadowBlur = 12;
-      
-      ctx.fillStyle = grad;
-      ctx.strokeStyle = '#fca5a5';
-      ctx.lineWidth = 1.5;
-
-      // Shape: Shuriken / Spike
-      ctx.beginPath();
-      ctx.moveTo(0, -30); // Very long point
-      ctx.lineTo(8, 0);
-      ctx.lineTo(15, 10); // Back spike
-      ctx.lineTo(0, 5);
-      ctx.lineTo(-15, 10);
-      ctx.lineTo(-8, 0);
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-      
-      ctx.restore();
-      
-      // Blinking Self-Destruct Light
-      const blink = Math.sin(Date.now()/50) > 0;
-      ctx.fillStyle = blink ? '#ffffff' : '#7f1d1d';
-      ctx.beginPath(); ctx.arc(0, -5, 3, 0, Math.PI*2); ctx.fill();
-  }
-
-  // --- 5. BOSS (MASSIVE FLAGSHIP) ---
-  private static drawBoss(ctx: CanvasRenderingContext2D, enemy: Enemy) {
-      const s = 1.6; // Scale
-
-      // Metallic Hull
-      const grad = ctx.createLinearGradient(-60, 0, 60, 0);
-      grad.addColorStop(0, '#09090b');
-      grad.addColorStop(0.5, '#3f3f46');
-      grad.addColorStop(1, '#09090b');
-
-      // Massive Engine Exhausts
-      ctx.save();
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.fillStyle = '#ef4444';
-      ctx.shadowColor = '#b91c1c';
-      ctx.shadowBlur = 25;
-      ctx.fillRect(-35*s, 30*s, 15*s, 15*s);
-      ctx.fillRect(20*s, 30*s, 15*s, 15*s);
-      ctx.restore();
-      
-      ctx.fillStyle = grad;
-      ctx.strokeStyle = '#ef4444';
-      ctx.lineWidth = 3;
-
-      // Complex Geometrical Hull
-      ctx.beginPath();
-      ctx.moveTo(0, -70*s); // Nose
-      ctx.lineTo(25*s, -40*s);
-      ctx.lineTo(70*s, -20*s); // Wing tip
-      ctx.lineTo(50*s, 30*s);  // Rear wing edge
-      ctx.lineTo(20*s, 50*s);  // Engine housing
-      ctx.lineTo(-20*s, 50*s);
-      ctx.lineTo(-50*s, 30*s);
-      ctx.lineTo(-70*s, -20*s);
-      ctx.lineTo(-25*s, -40*s);
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-
-      // Mechanical Vents (Dark areas)
-      ctx.fillStyle = '#1c1917';
-      ctx.beginPath();
-      ctx.moveTo(-10*s, -50*s); ctx.lineTo(10*s, -50*s); ctx.lineTo(0, 0);
-      ctx.fill();
-      
-      // Glowing Energy Lines (Vents)
-      ctx.strokeStyle = 'rgba(239, 68, 68, 0.6)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      for(let i=0; i<6; i++) {
-          const y = -45*s + i*7*s;
-          ctx.moveTo(-6*s, y); ctx.lineTo(6*s, y);
-      }
-      ctx.stroke();
-
-      // Core Reactor (Pulsating)
-      const pulse = 1 + Math.sin(Date.now() / 150) * 0.2;
-      ctx.save();
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.shadowColor = '#ff0000';
-      ctx.shadowBlur = 30 * pulse;
-      ctx.fillStyle = `rgba(220, 38, 38, ${pulse})`;
-      ctx.beginPath();
-      ctx.arc(0, 0, 12*s, 0, Math.PI*2);
-      ctx.fill();
-      ctx.restore();
-  }
+    /**
+     * 高性能光晕辅助函数 (替代 ShadowBlur)
+     */
+    private static drawEngineGlow(ctx: CanvasRenderingContext2D, x: number, y: number, size: number, color: string) {
+        ctx.save();
+        const g = ctx.createRadialGradient(x, y, 0, x, y, size);
+        g.addColorStop(0, '#fff');
+        g.addColorStop(0.4, color);
+        g.addColorStop(1, 'transparent');
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(x, y, size, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+    }
 }
