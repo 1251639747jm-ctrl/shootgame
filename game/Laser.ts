@@ -28,15 +28,29 @@ export class Laser extends Entity {
 
     update(dt: number) {
         if (this.owner.markedForDeletion) { this.markedForDeletion = true; return; }
+        
         this.timer += dt;
+        
+        // 1. 同步位置和旋转
         this.rotation = this.owner.rotation;
         this.position.x = this.owner.position.x + 40 * Math.sin(this.rotation);
         this.position.y = this.owner.position.y - 40 * Math.cos(this.rotation);
 
-        // 持续 1.2 秒后消失
-        if (this.timer > 1.2) this.markedForDeletion = true;
-    }
+        // 2. 核心：加上伤害数值逻辑
+        // 根据等级和伤害倍率计算最终伤害
+        const baseDamage = 60; // 激光每帧/秒的基础伤害
+        const levelFactor = 1 + (this.owner.level * 0.2);
+        
+        // 把伤害数值赋给 entity，引擎会自动进行碰撞检测
+        (this as any).damage = baseDamage * this.owner.damageMultiplier * levelFactor;
 
+        // 3. 激光持续时间控制
+        // 这里设为 1.2 秒，你可以根据需要调整
+        if (this.timer > 1.2) {
+            (this as any).damage = 0; // 消失前伤害归零
+            this.markedForDeletion = true;
+        }
+    }
     static draw(ctx: CanvasRenderingContext2D, laser: Laser) {
         const { x, y } = laser.position;
         const rot = laser.rotation;
