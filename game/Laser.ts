@@ -2,135 +2,159 @@ import { Entity } from "./Entities";
 import { EntityType, Vector2 } from "../types";
 import { Player } from "./Entities";
 
-// 激光配置：只需调整这里即可改变手感
-const LASER_STYLE = {
-    CORE_WIDTH: 12,        // 中心白光宽度
-    GLOW_LAYERS: 3,        // 晕染层数
-    MAX_LEN: 1600,         // 最大长度
-    COLORS: {
-        MAIN: '#00ffff',   // 青色外壳
-        CORE: '#ffffff',   // 白色核心
-        HINT: '#0088ff'    // 辅助深蓝色
-    },
-    PHASES: { CHARGE: 0.1, SUSTAIN: 0.8, DECAY: 0.2 }
+// ---------------------------------------------------------
+// 配置中心：在这里调整出你想要的“史诗感”
+// ---------------------------------------------------------
+const LASER_THEME = {
+    CORE_COLOR: '#FFFFFF',         // 核心：纯白
+    INNER_Glow: '#00FFFF',         // 内晕：青色
+    OUTER_GLOW: '#0044FF',         // 外晕：深蓝
+    ARC_COLOR: 'rgba(180, 255, 255, 0.8)', // 电弧颜色
+    BEAM_WIDTH: 35,                // 基础宽度
+    SEGMENTS: 5,                   // 电弧分段数（影响分支复杂度）
 };
 
 export class Laser extends Entity {
     owner: Player;
-    phase: 'charging' | 'firing' | 'decaying' = 'charging';
     timer: number = 0;
-    currentWidth: number = 0;
-    
-    // 抖动参数
-    private jitter: number = 0;
-    private flicker: number = 0;
+    seed: number = Math.random(); // 用于生成稳定的随机路径
 
     constructor(owner: Player) {
         const noseX = owner.position.x + 40 * Math.sin(owner.rotation);
         const noseY = owner.position.y - 40 * Math.cos(owner.rotation);
         super(noseX, noseY, EntityType.WEAPON_LASER);
-        
         this.owner = owner;
     }
 
     update(dt: number) {
         if (this.owner.markedForDeletion) { this.markedForDeletion = true; return; }
-
         this.timer += dt;
-        
-        // 1. 简单的状态机控制宽度
-        if (this.timer < LASER_STYLE.PHASES.CHARGE) {
-            this.phase = 'charging';
-            this.currentWidth = (this.timer / LASER_STYLE.PHASES.CHARGE) * 5;
-        } else if (this.timer < LASER_STYLE.PHASES.SUSTAIN) {
-            this.phase = 'firing';
-            this.currentWidth = LASER_STYLE.CORE_WIDTH + Math.sin(this.timer * 50) * 2; // 高频脉动
-        } else {
-            this.phase = 'decaying';
-            const progress = (this.timer - LASER_STYLE.PHASES.SUSTAIN) / LASER_STYLE.PHASES.DECAY;
-            this.currentWidth = LASER_STYLE.CORE_WIDTH * (1 - progress);
-            if (progress >= 1) this.markedForDeletion = true;
-        }
-
-        // 2. 更新位置和旋转
         this.rotation = this.owner.rotation;
         this.position.x = this.owner.position.x + 40 * Math.sin(this.rotation);
         this.position.y = this.owner.position.y - 40 * Math.cos(this.rotation);
 
-        // 3. 计算伤害逻辑（简化）
-        (this as any).damage = this.phase === 'firing' ? 50 * this.owner.damageMultiplier : 0;
-        
-        // 4. 生成高频随机值供渲染使用
-        this.jitter = (Math.random() - 0.5) * 4;
-        this.flicker = Math.random() > 0.8 ? 1.2 : 1.0; 
+        // 持续 1.2 秒后消失
+        if (this.timer > 1.2) this.markedForDeletion = true;
     }
 
     static draw(ctx: CanvasRenderingContext2D, laser: Laser) {
         const { x, y } = laser.position;
-        const len = LASER_STYLE.MAX_LEN;
         const rot = laser.rotation;
+        const len = 1500; // 激光射程
 
         ctx.save();
         ctx.translate(x, y);
         ctx.rotate(rot);
 
-        // 激光末端位置（本地坐标）
-        const endY = -len;
-
-        // 开启“叠加模式”，这是发光效果的灵魂
+        // 开启叠加模式：让光看起来在燃烧
         ctx.globalCompositeOperation = 'lighter';
 
-        // --- 核心渲染步骤（无 shadowBlur 方案） ---
+        // 1. 绘制底层：超宽动态光晕 (解决“肉感”的关键)
+        this.drawGlow(ctx, len, laser);
 
-        // 1. 外部大范围弱光晕 (Aura)
-        this.drawBeamLayer(ctx, endY, laser.currentWidth * 4, `rgba(0, 150, 255, ${0.1 * laser.flicker})`);
+        // 2. 绘制中层：流动能量束 (模拟质感)
+        this.drawEnergyBeam(ctx, len, laser);
 
-        // 2. 中层彩色光束 (Outer Beam)
-        this.drawBeamLayer(ctx, endY, laser.currentWidth * 2, `rgba(0, 255, 255, ${0.3 * laser.flicker})`);
+        // 3. 绘制核心：极亮白光
+        this.drawCore(ctx, len, laser);
 
-        // 3. 内层高能光束 (Inner Beam)
-        this.drawBeamLayer(ctx, endY, laser.currentWidth * 1.2, LASER_STYLE.COLORS.MAIN);
+        // 4. 绘制顶层：随机分支电弧 (史诗感的来源)
+        if (laser.timer < 0.8) {
+            this.drawLightningArcs(ctx, len, laser);
+        }
 
-        // 4. 极致白光核心 (Core)
-        // 核心加入 jitter 模拟空气电离抖动
-        ctx.translate(laser.jitter, 0);
-        this.drawBeamLayer(ctx, endY, laser.currentWidth * 0.4, LASER_STYLE.COLORS.CORE);
-
-        // 5. 绘制枪口爆发点 (Muzzle Flash)
-        this.drawMuzzle(ctx, laser);
+        // 5. 击中点火花 (Impact)
+        this.drawImpact(ctx, -len, laser);
 
         ctx.restore();
     }
 
-    private static drawBeamLayer(ctx: CanvasRenderingContext2D, endY: number, width: number, color: string) {
-        if (width <= 0) return;
-        ctx.beginPath();
-        ctx.lineWidth = width;
-        ctx.strokeStyle = color;
+    // --- 细节渲染逻辑 ---
+
+    private static drawGlow(ctx: CanvasRenderingContext2D, len: number, laser: Laser) {
+        const w = LASER_THEME.BEAM_WIDTH * 3 * (0.8 + Math.random() * 0.2);
+        const grad = ctx.createLinearGradient(-w, 0, w, 0);
+        grad.addColorStop(0, 'transparent');
+        grad.addColorStop(0.5, LASER_THEME.OUTER_GLOW);
+        grad.addColorStop(1, 'transparent');
+
+        ctx.fillStyle = grad;
+        ctx.globalAlpha = 0.3;
+        ctx.fillRect(-w/2, 0, w, -len);
+        ctx.globalAlpha = 1.0;
+    }
+
+    private static drawEnergyBeam(ctx: CanvasRenderingContext2D, len: number, laser: Laser) {
+        const w = LASER_THEME.BEAM_WIDTH;
+        // 关键点：创建一个随时间位移的渐变，模拟能量“流动”
+        const offset = (laser.timer * 2000) % len;
+        const grad = ctx.createLinearGradient(0, -offset, 0, -offset - len);
+        grad.addColorStop(0, LASER_THEME.INNER_Glow);
+        grad.addColorStop(0.2, LASER_THEME.CORE_COLOR);
+        grad.addColorStop(0.4, LASER_THEME.INNER_Glow);
+        grad.addColorStop(0.7, LASER_THEME.OUTER_GLOW);
+        grad.addColorStop(1, LASER_THEME.INNER_Glow);
+
+        ctx.strokeStyle = grad;
+        ctx.lineWidth = w;
         ctx.lineCap = 'round';
+        ctx.beginPath();
         ctx.moveTo(0, 0);
-        ctx.lineTo(0, endY);
+        ctx.lineTo(0, -len);
         ctx.stroke();
     }
 
-    private static drawMuzzle(ctx: CanvasRenderingContext2D, laser: Laser) {
-        const size = laser.currentWidth * 5;
-        const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, size);
-        grad.addColorStop(0, '#ffffff');
-        grad.addColorStop(0.3, LASER_STYLE.COLORS.MAIN);
+    private static drawCore(ctx: CanvasRenderingContext2D, len: number, laser: Laser) {
+        const w = LASER_THEME.BEAM_WIDTH * 0.3;
+        ctx.strokeStyle = LASER_THEME.CORE_COLOR;
+        ctx.lineWidth = w;
+        // 核心加入微小的左右随机偏移
+        const jitter = (Math.random() - 0.5) * 3;
+        ctx.beginPath();
+        ctx.moveTo(jitter, 0);
+        ctx.lineTo(jitter, -len);
+        ctx.stroke();
+    }
+
+    private static drawLightningArcs(ctx: CanvasRenderingContext2D, len: number, laser: Laser) {
+        ctx.strokeStyle = LASER_THEME.ARC_COLOR;
+        ctx.lineWidth = 2;
+
+        // 绘制两条交替穿梭的电弧
+        for (let j = 0; j < 2; j++) {
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            let curY = 0;
+            const step = len / LASER_THEME.SEGMENTS;
+
+            for (let i = 0; i < LASER_THEME.SEGMENTS; i++) {
+                curY -= step;
+                const curX = (Math.random() - 0.5) * LASER_THEME.BEAM_WIDTH * 2.5;
+                ctx.lineTo(curX, curY);
+            }
+            ctx.stroke();
+        }
+    }
+
+    private static drawImpact(ctx: CanvasRenderingContext2D, endY: number, laser: Laser) {
+        // 击中点的剧烈闪光
+        const size = 60 + Math.random() * 40;
+        const grad = ctx.createRadialGradient(0, endY, 0, 0, endY, size);
+        grad.addColorStop(0, '#FFFFFF');
+        grad.addColorStop(0.4, LASER_THEME.INNER_Glow);
         grad.addColorStop(1, 'transparent');
 
         ctx.fillStyle = grad;
         ctx.beginPath();
-        ctx.arc(0, 0, size, 0, Math.PI * 2);
+        ctx.arc(0, endY, size, 0, Math.PI * 2);
         ctx.fill();
 
-        // 绘制一个十字闪光加强视觉冲击
-        if (laser.phase === 'firing') {
-            ctx.fillStyle = 'white';
-            const spike = size * 1.5;
-            ctx.fillRect(-spike, -1, spike * 2, 2);
-            ctx.fillRect(-1, -spike, 2, spike * 2);
+        // 随机溅射火星
+        ctx.fillStyle = LASER_THEME.CORE_COLOR;
+        for(let i=0; i<5; i++) {
+            const px = (Math.random()-0.5) * 50;
+            const py = endY + (Math.random()-0.5) * 50;
+            ctx.fillRect(px, py, 4, 4);
         }
     }
 }
