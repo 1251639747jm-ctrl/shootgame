@@ -1,442 +1,384 @@
-import { EntityType, Vector2, WeaponType, ItemType } from "../types";
+import { EntityType, WeaponType } from "../types";
+import { EnemyModel } from "./EnemyModel"; // 引入上一轮优化的渲染器
 
-/**
- * ==================================================================================
- * SECTION 1: 核心物理与基础系统
- * ==================================================================================
- */
-
-// 增加基础向量运算助手，减少代码冗余并提升计算复杂度
-const vec = {
-    add: (v1: Vector2, v2: Vector2) => ({ x: v1.x + v2.x, y: v1.y + v2.y }),
-    sub: (v1: Vector2, v2: Vector2) => ({ x: v1.x - v2.x, y: v1.y - v2.y }),
-    mul: (v: Vector2, s: number) => ({ x: v.x * s, y: v.y * s }),
-    mag: (v: Vector2) => Math.sqrt(v.x * v.x + v.y * v.y),
-    normalize: (v: Vector2) => {
-        const m = Math.sqrt(v.x * v.x + v.y * v.y);
-        return m > 0 ? { x: v.x / m, y: v.y / m } : { x: 0, y: 0 };
-    },
-    dist: (v1: Vector2, v2: Vector2) => Math.sqrt((v1.x - v2.x) ** 2 + (v1.y - v2.y) ** 2),
-    lerp: (v1: Vector2, v2: Vector2, t: number) => ({
-        x: v1.x + (v2.x - v1.x) * t,
-        y: v1.y + (v2.y - v1.y) * t
-    })
+// ==========================================
+// 核心数学库 (内联优化以减少函数调用开销)
+// ==========================================
+const Vec2 = {
+    add: (v1: {x:number, y:number}, v2: {x:number, y:number}) => ({ x: v1.x + v2.x, y: v1.y + v2.y }),
+    sub: (v1: {x:number, y:number}, v2: {x:number, y:number}) => ({ x: v1.x - v2.x, y: v1.y - v2.y }),
+    mag: (v: {x:number, y:number}) => Math.sqrt(v.x * v.x + v.y * v.y),
+    lerp: (a: number, b: number, t: number) => a + (b - a) * t,
+    distSq: (v1: {x:number, y:number}, v2: {x:number, y:number}) => (v1.x - v2.x)**2 + (v1.y - v2.y)**2
 };
 
+/**
+ * 基础实体抽象类
+ * 实现了基于欧拉积分的物理运动与空间哈希所需的边界盒
+ */
 export abstract class Entity {
-    id: string = crypto.randomUUID();
-    position: Vector2;
-    velocity: Vector2 = { x: 0, y: 0 };
-    acceleration: Vector2 = { x: 0, y: 0 };
+    public id: string = crypto.randomUUID();
+    public position: { x: number; y: number };
+    public velocity: { x: number; y: number } = { x: 0, y: 0 };
+    public acceleration: { x: number; y: number } = { x: 0, y: 0 };
     
-    radius: number = 10;
-    type: EntityType;
-    rotation: number = 0;
-    targetRotation: number = 0;
+    public radius: number;
+    public rotation: number = 0;
+    public isDead: boolean = false;
     
-    opacity: number = 1;
-    markedForDeletion: boolean = false;
-    
-    // 视觉与物理层级
-    zOrder: number = 0;
-    mass: number = 1.0;
-    friction: number = 0.95; // 阻尼系数
+    // 物理属性
+    protected friction: number = 0.95; // 空气阻力 (0-1)
+    protected mass: number = 1.0;
 
-    // 时间戳管理
-    spawnTime: number = performance.now();
-    age: number = 0;
-
-    constructor(x: number, y: number, type: EntityType) {
+    constructor(x: number, y: number, radius: number) {
         this.position = { x, y };
-        this.type = type;
+        this.radius = radius;
     }
 
     /**
-     * 基础物理更新逻辑
+     * 物理核心更新 (dt: 秒)
      */
-    protected applyPhysics(dt: number) {
-        // 速度集成 (Euler Integration)
+    update(dt: number) {
+        // 1. 速度更新 (v = v0 + at)
         this.velocity.x += this.acceleration.x * dt;
         this.velocity.y += this.acceleration.y * dt;
-        
-        // 摩擦力/空气阻力
-        this.velocity.x *= (1 - (1 - this.friction) * dt * 60);
-        this.velocity.y *= (1 - (1 - this.friction) * dt * 60);
-        
-        // 位移集成
+
+        // 2. 阻尼衰减 (模拟大气摩擦)
+        // 使用 time-step independent damping 公式: vel *= pow(damping, dt * 60)
+        const d = Math.pow(this.friction, dt * 60);
+        this.velocity.x *= d;
+        this.velocity.y *= d;
+
+        // 3. 位移更新 (x = x0 + vt)
         this.position.x += this.velocity.x * dt;
         this.position.y += this.velocity.y * dt;
-        
-        // 重置加速度
+
+        // 4. 重置瞬时力
         this.acceleration = { x: 0, y: 0 };
-        
-        // 角度平滑平冲 (插值旋转)
-        const rotationSpeed = 10;
-        let diff = this.targetRotation - this.rotation;
-        while (diff > Math.PI) diff -= Math.PI * 2;
-        while (diff < -Math.PI) diff += Math.PI * 2;
-        this.rotation += diff * dt * rotationSpeed;
-        
-        this.age += dt;
     }
 
-    abstract update(dt: number, context?: any): void;
+    /**
+     * 施加力向量 (F = ma -> a = F/m)
+     */
+    applyForce(x: number, y: number) {
+        this.acceleration.x += x / this.mass;
+        this.acceleration.y += y / this.mass;
+    }
+
+    abstract draw(ctx: CanvasRenderingContext2D): void;
 }
 
 /**
- * ==================================================================================
- * SECTION 2: 英雄舰船 (PLAYER)
- * ==================================================================================
+ * ==========================================
+ * 玩家战机 (Player)
+ * ==========================================
  */
-
 export class Player extends Entity {
-    // 基础属性
-    health: number = 100;
-    maxHealth: number = 100;
-    mana: number = 100;
-    maxMana: number = 100;
-    manaRegen: number = 8;
-
-    // 成长体系
-    level: number = 1;
-    xp: number = 0;
-    nextLevelXp: number = 1000;
-    damageMultiplier: number = 1.0;
-
-    // 进阶物理参数
-    thrustPower: number = 4200;
-    maxSpeed: number = 750;
-    bankingAngle: number = 0.5; // 侧倾感
+    public health: number = 100;
+    public maxHealth: number = 100;
+    public energy: number = 100;
     
-    // 武器系统
-    currentWeapon: WeaponType = WeaponType.VULCAN;
-    fireRateMultiplier: number = 1.0;
-    lastShotTime: number = 0;
+    // 状态机
+    public shieldActive: boolean = false;
+    public weaponLevel: number = 1;
     
-    // 蓄力与超载系统
-    isCharging: boolean = false;
-    chargeLevel: number = 0;
-    overdriveActive: boolean = false;
-    overdriveEnergy: number = 0;
-
-    // 技能系统 (对象字典化)
-    skills = {
-        shield: { current: 0, max: 20, active: false, duration: 6, cost: 40 },
-        blackhole: { current: 0, max: 30, active: false, cost: 70 },
-        shockwave: { current: 0, max: 12, cost: 30 }
-    };
+    // 视觉平滑属性
+    private targetRotation: number = 0;
+    private engineThrust: number = 0;
 
     constructor(x: number, y: number) {
-        super(x, y, EntityType.PLAYER);
-        this.radius = 22;
-        this.friction = 0.92;
-        this.zOrder = 100;
+        super(x, y, 22); // 碰撞半径
+        this.friction = 0.92; // 较高的阻力以获得精准操控感
+        this.mass = 1.2;
     }
 
     update(dt: number) {
-        this.applyPhysics(dt);
+        super.update(dt);
 
-        // 动态侧倾逻辑：根据水平速度改变旋转角度，增强飞行感
-        this.targetRotation = (this.velocity.x / this.maxSpeed) * this.bankingAngle;
+        // 1. 动态侧倾 (Banking): 根据横向速度计算机身倾斜角
+        // 速度越快，倾斜角度越大，最大倾斜 25度 (0.45 rad)
+        const maxBankAngle = 0.45;
+        const targetBank = (this.velocity.x / 600) * maxBankAngle;
+        this.rotation = Vec2.lerp(this.rotation, targetBank, dt * 8);
 
-        // 能量回收与过载逻辑
-        this.mana = Math.min(this.maxMana, this.mana + this.manaRegen * dt);
+        // 2. 能量自动恢复
+        if (this.energy < 100 && !this.shieldActive) {
+            this.energy += dt * 5;
+        }
+
+        // 3. 边界约束 (弹性墙壁)
+        if (this.position.x < 30) this.applyForce(2000, 0);
+        if (this.position.x > window.innerWidth - 30) this.applyForce(-2000, 0);
+    }
+
+    draw(ctx: CanvasRenderingContext2D) {
+        // 调用我们之前写好的复杂渲染逻辑 (这里假设它在 Entity 内部，或者外部 Helper)
+        // 由于 Player 比较特殊且通常单例，我们可以直接在这里写渲染，
+        // 或者复用之前的 EnemyModel 风格的 PlayerModel
+        this.renderPlayer(ctx);
+    }
+
+    // 也就是上一轮提供的 Player 渲染逻辑
+    private renderPlayer(ctx: CanvasRenderingContext2D) {
+        const { x, y } = this.position;
+        const t = performance.now() / 1000;
+
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(this.rotation);
+
+        // --- 引擎尾焰 ---
+        const thrust = 1 + Math.sin(t * 30) * 0.1; 
+        this.drawEngine(ctx, 0, 18, 8, 32 * thrust); // 主
+        this.drawEngine(ctx, -14, 12, 4, 16 * thrust); // 左副
+        this.drawEngine(ctx, 14, 12, 4, 16 * thrust); // 右副
+
+        // --- 机体 ---
+        // 底部阴影层
+        ctx.fillStyle = '#0f172a';
+        ctx.beginPath();
+        ctx.moveTo(0, -32); ctx.lineTo(24, 16); ctx.lineTo(0, 24); ctx.lineTo(-24, 16);
+        ctx.fill();
+
+        // 顶部装甲层 (金属光泽)
+        const grad = ctx.createLinearGradient(-15, -20, 15, 20);
+        grad.addColorStop(0, '#e2e8f0');
+        grad.addColorStop(0.5, '#64748b');
+        grad.addColorStop(1, '#1e293b');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.moveTo(0, -28); ctx.lineTo(12, 8); ctx.lineTo(0, 14); ctx.lineTo(-12, 8);
+        ctx.fill();
+
+        // 驾驶舱发光
+        ctx.fillStyle = '#0ea5e9';
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.beginPath(); ctx.ellipse(0, -8, 3, 6, 0, 0, Math.PI*2); ctx.fill();
         
-        if (this.overdriveActive) {
-            this.overdriveEnergy -= dt * 20;
-            this.manaRegen = 20; // 过载状态回蓝极快
-            if (this.overdriveEnergy <= 0) this.overdriveActive = false;
+        // --- 护盾 ---
+        if (this.shieldActive) {
+            ctx.strokeStyle = `rgba(56, 189, 248, ${0.4 + Math.sin(t*10)*0.2})`;
+            ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.arc(0, 0, 35, 0, Math.PI*2); ctx.stroke();
         }
 
-        // 技能冷却递减
-        Object.values(this.skills).forEach(s => {
-            if (s.current > 0) s.current -= dt;
-        });
-
-        // 边界约束 (弹性约束)
-        const margin = 50;
-        if (this.position.x < margin) { this.acceleration.x += 5000 * dt; this.velocity.x *= 0.9; }
-        if (this.position.x > 2000 - margin) { this.acceleration.x -= 5000 * dt; this.velocity.x *= 0.9; }
+        ctx.restore();
     }
 
-    useSkill(skillName: 'shield' | 'blackhole' | 'shockwave'): boolean {
-        const s = this.skills[skillName];
-        if (s.current <= 0 && this.mana >= s.cost) {
-            this.mana -= s.cost;
-            s.current = s.max;
-            return true;
-        }
-        return false;
-    }
-
-    gainXp(amount: number) {
-        this.xp += amount;
-        if (this.xp >= this.nextLevelXp) {
-            this.level++;
-            this.xp -= this.nextLevelXp;
-            this.nextLevelXp = Math.floor(this.nextLevelXp * 1.6);
-            this.damageMultiplier += 0.25;
-            this.maxHealth += 20;
-            this.health = this.maxHealth;
-            // 升级爆发冲击波钩子可以在外部调用
-        }
+    private drawEngine(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number) {
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        const g = ctx.createLinearGradient(x, y, x, y + h);
+        g.addColorStop(0, '#bae6fd'); // 核心白蓝
+        g.addColorStop(1, 'transparent');
+        ctx.fillStyle = g;
+        ctx.beginPath(); ctx.ellipse(x, y + h/2, w/2, h/2, 0, 0, Math.PI*2); ctx.fill();
+        ctx.restore();
     }
 }
 
 /**
- * ==================================================================================
- * SECTION 3: 智能敌机 (STEERING AI)
- * ==================================================================================
+ * ==========================================
+ * 敌人 (Enemy)
+ * ==========================================
  */
-
 export class Enemy extends Entity {
-    health: number;
-    maxHealth: number;
-    scoreValue: number;
+    public type: EntityType;
+    public health: number;
+    public maxHealth: number;
     
-    // AI 状态机
-    behaviorState: 'cruise' | 'attack' | 'retreat' | 'orbit' = 'cruise';
-    fireTimer: number = 0;
-    fireRate: number;
-    
-    isBoss: boolean = false;
-    bossPhase: number = 1;
-    
-    private startX: number;
-    private wanderOffset: number = Math.random() * Math.PI * 2;
+    // AI 专用变量
+    private aiPhase: number = Math.random() * 100;
+    private anchorY: number; // 悬停基准线
 
-    constructor(x: number, y: number, difficultyMult: number, isBoss: boolean = false) {
-        const type = isBoss ? EntityType.ENEMY_BOSS : Enemy.getRandomType();
-        super(x, y, type);
-        this.startX = x;
-        this.isBoss = isBoss;
-        this.friction = 0.96;
-
-        // 根据类型初始化复杂的数值矩阵
-        this.setupStats(difficultyMult);
-    }
-
-    private static getRandomType(): EntityType {
-        const r = Math.random();
-        if (r > 0.9) return EntityType.ENEMY_TANK;
-        if (r > 0.7) return EntityType.ENEMY_FAST;
-        if (r > 0.5) return EntityType.ENEMY_KAMIKAZE;
-        return EntityType.ENEMY_BASIC;
-    }
-
-    private setupStats(difficulty: number) {
-        const scale = 1 + difficulty * 0.5;
-        switch (this.type) {
+    constructor(x: number, y: number, type: EntityType) {
+        super(x, y, 20);
+        this.type = type;
+        this.anchorY = y;
+        
+        // 根据类型初始化数值
+        switch(type) {
             case EntityType.ENEMY_BOSS:
-                this.health = 25000 * scale;
-                this.radius = 110;
-                this.fireRate = 600;
-                this.scoreValue = 5000;
-                break;
+                this.health = 5000; this.radius = 80; this.friction = 0.98; break;
             case EntityType.ENEMY_TANK:
-                this.health = 1200 * scale;
-                this.radius = 48;
-                this.fireRate = 2000;
-                this.scoreValue = 1000;
-                break;
-            case EntityType.ENEMY_KAMIKAZE:
-                this.health = 100 * scale;
-                this.radius = 18;
-                this.fireRate = Infinity;
-                this.scoreValue = 400;
-                this.friction = 0.99; // 几乎无阻力
-                break;
-            default:
-                this.health = 250 * scale;
-                this.radius = 28;
-                this.fireRate = 2500;
-                this.scoreValue = 150;
+                this.health = 300; this.radius = 40; this.friction = 0.95; break;
+            case EntityType.ENEMY_FAST:
+                this.health = 40; this.radius = 15; this.friction = 0.99; break; // 极低阻力
+            default: // BASIC
+                this.health = 60; this.radius = 20; this.friction = 0.95; break;
         }
         this.maxHealth = this.health;
     }
 
-    update(dt: number, playerPos?: Vector2) {
-        this.applyPhysics(dt);
-        this.fireTimer -= dt * 1000;
+    update(dt: number) {
+        super.update(dt);
+        this.aiPhase += dt;
 
-        if (this.isBoss) {
-            this.updateBossAI(dt);
-        } else {
-            this.updateNormalAI(dt, playerPos);
-        }
-    }
-
-    /**
-     * 实现转向力 AI：让敌机移动更自然，不是死板的直线
-     */
-    private updateNormalAI(dt: number, playerPos?: Vector2) {
-        if (!playerPos) return;
-
-        const dist = vec.dist(this.position, playerPos);
-
-        switch (this.type) {
-            case EntityType.ENEMY_KAMIKAZE:
-                // 狂暴冲锋 AI：不断修正方向指向玩家
-                const chargeForce = vec.mul(vec.normalize(vec.sub(playerPos, this.position)), 1200);
-                this.acceleration = vec.add(this.acceleration, chargeForce);
-                this.targetRotation = Math.atan2(this.velocity.y, this.velocity.x) + Math.PI/2;
+        // --- 简易 AI 行为树 ---
+        switch(this.type) {
+            case EntityType.ENEMY_BASIC:
+                // 正弦波下落
+                this.velocity.y = 80;
+                this.velocity.x = Math.sin(this.aiPhase * 2) * 100;
+                this.rotation = Math.sin(this.aiPhase * 2) * 0.3;
                 break;
 
             case EntityType.ENEMY_FAST:
-                // 骚扰 AI：在玩家上方进行“S”型穿插
-                const targetX = this.startX + Math.sin(this.age * 4) * 300;
-                const steerX = (targetX - this.position.x) * 10;
-                this.acceleration.x = steerX;
+                // 高速S型穿插
                 this.velocity.y = 350;
-                this.targetRotation = Math.PI + Math.sin(this.age * 4) * 0.3;
+                this.velocity.x = Math.cos(this.aiPhase * 5) * 250;
+                // 强制朝向速度方向
+                this.rotation = Math.atan2(this.velocity.y, this.velocity.x) - Math.PI/2;
                 break;
 
             case EntityType.ENEMY_TANK:
-                // 阵地 AI：缓慢推进，锁定玩家方向瞄准
-                this.velocity.y = 80;
-                this.targetRotation = Math.atan2(playerPos.y - this.position.y, playerPos.x - this.position.x) - Math.PI/2;
+                // 缓慢推进 + 阻尼感
+                this.velocity.y = 40;
                 break;
 
-            default:
-                // 基础 AI：波浪形前进
-                this.velocity.y = 150;
-                this.velocity.x = Math.sin(this.age * 2 + this.wanderOffset) * 100;
-                this.targetRotation = Math.PI;
+            case EntityType.ENEMY_BOSS:
+                // 8字形悬停
+                const targetX = window.innerWidth/2 + Math.sin(this.aiPhase * 0.5) * 300;
+                const targetY = 150 + Math.sin(this.aiPhase) * 50;
+                // 弹性跟随
+                this.velocity.x += (targetX - this.position.x) * dt * 2;
+                this.velocity.y += (targetY - this.position.y) * dt * 2;
+                this.rotation = (this.velocity.x / 500) * 0.2;
+                break;
         }
     }
 
-    private updateBossAI(dt: number) {
-        // 多阶段血量控制
-        const hpPercent = this.health / this.maxHealth;
-        if (hpPercent < 0.3) this.bossPhase = 3;
-        else if (hpPercent < 0.7) this.bossPhase = 2;
-
-        // BOSS 独特的 8 字形飞行轨迹
-        const targetX = this.startX + Math.sin(this.age * 0.8) * 400;
-        const targetY = 180 + Math.cos(this.age * 1.6) * 80;
-        
-        this.position.x = vec.lerp(this.position, {x: targetX, y: targetY}, dt * 2).x;
-        this.position.y = vec.lerp(this.position, {x: targetX, y: targetY}, dt * 2).y;
-        
-        // 旋转：轻微摇摆
-        this.targetRotation = Math.PI + Math.sin(this.age) * 0.1;
+    draw(ctx: CanvasRenderingContext2D) {
+        // ★ 核心连接点：调用外部优化好的 EnemyModel 进行渲染
+        EnemyModel.draw(ctx, this);
     }
 }
 
 /**
- * ==================================================================================
- * SECTION 4: 粒子、弹药与环境
- * ==================================================================================
+ * ==========================================
+ * 子弹 (Bullet) - 极致视觉
+ * ==========================================
  */
-
 export class Bullet extends Entity {
-    damage: number;
-    weaponType: WeaponType | null;
-    isPlayerBullet: boolean;
+    public isEnemy: boolean;
+    public damage: number;
     
-    // 进阶属性：寿命、尾迹强度
-    life: number = 2.5;
-    trailTimer: number = 0;
-
-    constructor(x: number, y: number, isPlayer: boolean, type: WeaponType, angle: number, owner: Player | null) {
-        super(x, y, isPlayer ? EntityType.BULLET_PLAYER : EntityType.BULLET_ENEMY);
-        this.isPlayerBullet = isPlayer;
-        this.weaponType = type;
+    constructor(x: number, y: number, angle: number, isEnemy: boolean) {
+        super(x, y, isEnemy ? 6 : 4);
+        this.isEnemy = isEnemy;
+        this.friction = 1.0; // 子弹无阻力
+        this.damage = isEnemy ? 10 : 25;
         this.rotation = angle;
-        this.friction = 1.0; // 子弹通常不损失速度
 
-        const mult = owner ? owner.damageMultiplier : 1;
-        this.setupBullet(type, angle, mult);
+        const speed = isEnemy ? 400 : 1200;
+        this.velocity.x = Math.sin(angle) * speed;
+        this.velocity.y = -Math.cos(angle) * speed;
     }
 
-    private setupBullet(type: WeaponType, angle: number, mult: number) {
-        const speed = 1500;
-        this.damage = 35 * mult;
+    draw(ctx: CanvasRenderingContext2D) {
+        ctx.save();
+        ctx.translate(this.position.x, this.position.y);
+        ctx.rotate(this.rotation);
         
-        // 根据武器类型定制物理属性
-        if (this.isPlayerBullet) {
-            switch(type) {
-                case WeaponType.PLASMA:
-                    this.damage *= 1.8;
-                    this.velocity = { x: Math.sin(angle)*1100, y: -Math.cos(angle)*1100 };
-                    this.radius = 8;
-                    break;
-                case WeaponType.TESLA:
-                    this.damage *= 0.6; // 靠射速
-                    this.velocity = { x: Math.sin(angle)*2200, y: -Math.cos(angle)*2200 };
-                    this.radius = 3;
-                    break;
-                default:
-                    this.velocity = { x: Math.sin(angle)*speed, y: -Math.cos(angle)*speed };
-                    this.radius = 5;
-            }
+        ctx.globalCompositeOperation = 'lighter';
+
+        if (this.isEnemy) {
+            // 敌方：脉冲等离子球 (不稳定的红/橙)
+            const pulse = 1 + Math.sin(performance.now() / 50) * 0.2;
+            // 外光晕
+            const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 12 * pulse);
+            g.addColorStop(0, 'rgba(239, 68, 68, 1)');
+            g.addColorStop(1, 'transparent');
+            ctx.fillStyle = g;
+            ctx.beginPath(); ctx.arc(0, 0, 12 * pulse, 0, Math.PI*2); ctx.fill();
+            // 核心
+            ctx.fillStyle = '#fff';
+            ctx.beginPath(); ctx.arc(0, 0, 3, 0, Math.PI*2); ctx.fill();
         } else {
-            this.velocity = { x: Math.sin(angle)*500, y: Math.cos(angle)*500 };
-            this.radius = 6;
+            // 玩家：超高速激光束 (流体拉伸感)
+            // 使用线性渐变模拟光剑效果
+            const len = 30;
+            const w = 4;
+            const g = ctx.createLinearGradient(0, -len, 0, len);
+            g.addColorStop(0, 'rgba(56, 189, 248, 0)'); // 尾部透明
+            g.addColorStop(0.5, '#38bdf8'); // 中段青蓝
+            g.addColorStop(1, '#ffffff'); // 头部极致亮白
+
+            ctx.fillStyle = g;
+            ctx.beginPath();
+            // 绘制一个两头尖中间宽的梭形
+            ctx.moveTo(0, -len);
+            ctx.quadraticCurveTo(w, 0, 0, len);
+            ctx.quadraticCurveTo(-w, 0, 0, -len);
+            ctx.fill();
         }
-    }
 
-    update(dt: number) {
-        this.applyPhysics(dt);
-        this.life -= dt;
-        if (this.life <= 0) this.markedForDeletion = true;
-    }
-}
-
-export class Star extends Entity {
-    parallaxSpeed: number;
-    color: string;
-
-    constructor(w: number, h: number) {
-        // 随机深度模拟 3D 效果
-        const depth = Math.random();
-        super(Math.random() * w, Math.random() * h, EntityType.STAR);
-        
-        this.parallaxSpeed = 50 + depth * 250;
-        this.radius = 0.4 + depth * 1.8;
-        this.opacity = 0.2 + depth * 0.8;
-        
-        // 远处的星发蓝，近处的星发白
-        this.color = depth < 0.3 ? '#88aaff' : '#ffffff';
-    }
-
-    update(dt: number) {
-        this.position.y += this.parallaxSpeed * dt;
-        // 循环背景
-        if (this.position.y > 2000) {
-            this.position.y = -10;
-            this.position.x = Math.random() * 2000;
-        }
+        ctx.restore();
     }
 }
 
 /**
- * 动效系统：残影粒子
+ * ==========================================
+ * 粒子 (Particle) - 运动模糊技术
+ * ==========================================
  */
 export class Particle extends Entity {
-    private initialLife: number;
-    private shrink: boolean;
+    public life: number;
+    public maxLife: number;
+    public color: string;
 
-    constructor(x: number, y: number, color: string, speed: number, life: number, size: number, shrink: boolean = true) {
-        super(x, y, EntityType.PARTICLE);
-        this.initialLife = life;
-        this.age = life;
-        this.radius = size;
-        this.shrink = shrink;
-        this.friction = 0.94;
+    constructor(x: number, y: number, color: string, speed: number, life: number) {
+        super(x, y, 0); // 粒子不需要碰撞半径
+        this.color = color;
+        this.life = life;
+        this.maxLife = life;
+        this.friction = 0.94; // 粒子会有较强的阻力
 
+        // 随机爆炸方向
         const angle = Math.random() * Math.PI * 2;
-        const s = Math.random() * speed;
-        this.velocity = { x: Math.cos(angle) * s, y: Math.sin(angle) * s };
+        const v = Math.random() * speed;
+        this.velocity = {
+            x: Math.cos(angle) * v,
+            y: Math.sin(angle) * v
+        };
     }
 
     update(dt: number) {
-        this.applyPhysics(dt);
-        this.age -= dt;
-        this.opacity = this.age / this.initialLife;
-        if (this.shrink) this.radius *= (1 - dt * 2);
-        if (this.age <= 0) this.markedForDeletion = true;
+        super.update(dt);
+        this.life -= dt;
+        if (this.life <= 0) this.isDead = true;
+    }
+
+    draw(ctx: CanvasRenderingContext2D) {
+        const progress = this.life / this.maxLife; // 1.0 -> 0.0
+        
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.translate(this.position.x, this.position.y);
+
+        // ★ 运动模糊核心：计算速度的大小，将其作为粒子的长度
+        const speed = Vec2.mag(this.velocity);
+        // 限制最大拉伸长度，避免过长
+        const length = Math.min(speed * 0.06, 20); 
+        
+        // 旋转画布到速度方向
+        const angle = Math.atan2(this.velocity.y, this.velocity.x);
+        ctx.rotate(angle);
+
+        // 绘制流星状线条 (头部不透明，尾部透明)
+        const g = ctx.createLinearGradient(0, 0, -length, 0);
+        g.addColorStop(0, this.color);
+        g.addColorStop(1, 'transparent'); // 尾迹消失
+
+        ctx.strokeStyle = g;
+        ctx.lineWidth = 2 * progress; // 随时间变细
+        ctx.lineCap = 'round';
+        
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(-length, 0); // 向速度反方向延伸
+        ctx.stroke();
+
+        ctx.restore();
     }
 }
-
-// 其余辅助类 (FloatingText, Item, Nebula, Meteor) 可以基于此物理模型快速扩展...
