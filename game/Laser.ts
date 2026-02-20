@@ -149,10 +149,15 @@ export class Laser extends Entity {
         const levelBoost = 1 + (this.owner.level * 0.25);
         (this as any).damage = LASER_THEME.STATS.BASE_DAMAGE * this.owner.damageMultiplier * levelBoost * damageMultiplier;
 
-        // 更新火花粒子
+        // ==========================================
+        // 修复：更新火花粒子 (修复了之前的数组对象调用错误)
+        // ==========================================
         for (let i = this.sparks.length - 1; i >= 0; i--) {
-            this.sparks.update(dt);
-            if (this.sparks.life <= 0) this.sparks.splice(i, 1);
+            const spark = this.sparks;
+            spark.update(dt);
+            if (spark.life <= 0) {
+                this.sparks.splice(i, 1);
+            }
         }
 
         // 颜色偏移（用于色散特效）
