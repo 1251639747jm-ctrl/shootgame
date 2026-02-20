@@ -5,7 +5,6 @@ import { EnemyModel } from "./EnemyModel";
  * ==========================================
  * 1. 基础实体抽象类 (Core Entity)
  * ==========================================
- * 实现了基于欧拉积分的物理运动系统
  */
 export abstract class Entity {
     public id: string = crypto.randomUUID();
@@ -18,7 +17,7 @@ export abstract class Entity {
     public isDead: boolean = false;
     
     // 物理参数
-    protected friction: number = 1.0; // 1.0 = 无阻力, 0.9 = 空气阻力
+    protected friction: number = 1.0; // 1.0 = 无阻力
     protected mass: number = 1.0;
 
     constructor(x: number, y: number, radius: number) {
@@ -26,24 +25,19 @@ export abstract class Entity {
         this.radius = radius;
     }
 
-    /**
-     * 物理更新循环
-     * @param dt 增量时间 (秒)
-     */
     update(dt: number) {
         // 1. 速度更新 (v = v0 + at)
         this.velocity.x += this.acceleration.x * dt;
         this.velocity.y += this.acceleration.y * dt;
 
-        // 2. 阻力衰减 (模拟大气摩擦)
+        // 2. 阻尼衰减
         if (this.friction < 1.0) {
-            // 使用时间无关的阻尼公式
             const damping = Math.pow(this.friction, dt * 60);
             this.velocity.x *= damping;
             this.velocity.y *= damping;
         }
 
-        // 3. 位移更新 (p = p0 + vt)
+        // 3. 位移更新
         this.position.x += this.velocity.x * dt;
         this.position.y += this.velocity.y * dt;
 
@@ -51,9 +45,6 @@ export abstract class Entity {
         this.acceleration = { x: 0, y: 0 };
     }
 
-    /**
-     * 施加力 (F = ma)
-     */
     applyForce(x: number, y: number) {
         this.acceleration.x += x / this.mass;
         this.acceleration.y += y / this.mass;
@@ -75,21 +66,17 @@ export class Player extends Entity {
     public weaponLevel: number = 1;
 
     constructor(x: number, y: number) {
-        super(x, y, 20); // 碰撞半径
-        this.friction = 0.92; // 较高的操控阻尼感
+        super(x, y, 20);
+        this.friction = 0.92;
         this.mass = 1.2;
     }
 
     update(dt: number) {
         super.update(dt);
-        
-        // 动态侧倾 (Banking): 根据横向速度倾斜机身
-        const maxBankAngle = 0.45; // 约25度
+        const maxBankAngle = 0.45;
         const targetRotation = (this.velocity.x / 600) * maxBankAngle;
-        // 平滑插值
         this.rotation += (targetRotation - this.rotation) * dt * 10;
         
-        // 能量自然恢复
         if (!this.shieldActive && this.energy < 100) {
             this.energy += dt * 5;
         }
@@ -103,19 +90,19 @@ export class Player extends Entity {
         ctx.translate(x, y);
         ctx.rotate(this.rotation);
 
-        // 引擎光效 (脉冲)
+        // 引擎光效
         const pulse = 1 + Math.sin(t * 20) * 0.1;
-        this.drawThruster(ctx, 0, 18, 8, 32 * pulse, '#0ea5e9'); // 主
-        this.drawThruster(ctx, -12, 12, 4, 16 * pulse, '#38bdf8'); // 左
-        this.drawThruster(ctx, 12, 12, 4, 16 * pulse, '#38bdf8'); // 右
+        this.drawThruster(ctx, 0, 18, 8, 32 * pulse, '#0ea5e9');
+        this.drawThruster(ctx, -12, 12, 4, 16 * pulse, '#38bdf8');
+        this.drawThruster(ctx, 12, 12, 4, 16 * pulse, '#38bdf8');
 
-        // 机身底层 (暗色)
+        // 机身
         ctx.fillStyle = '#0f172a';
         ctx.beginPath();
         ctx.moveTo(0, -32); ctx.lineTo(24, 16); ctx.lineTo(0, 24); ctx.lineTo(-24, 16);
         ctx.fill();
 
-        // 顶部装甲 (金属光泽渐变)
+        // 顶部装甲
         const g = ctx.createLinearGradient(-15, -20, 15, 20);
         g.addColorStop(0, '#e2e8f0');
         g.addColorStop(0.5, '#64748b');
@@ -125,12 +112,12 @@ export class Player extends Entity {
         ctx.moveTo(0, -28); ctx.lineTo(12, 8); ctx.lineTo(0, 14); ctx.lineTo(-12, 8);
         ctx.fill();
 
-        // 驾驶舱发光
+        // 驾驶舱
         ctx.fillStyle = '#bae6fd';
         ctx.globalCompositeOperation = 'lighter';
         ctx.beginPath(); ctx.ellipse(0, -8, 3, 6, 0, 0, Math.PI*2); ctx.fill();
 
-        // 护盾效果
+        // 护盾
         if (this.shieldActive) {
             ctx.strokeStyle = `rgba(56, 189, 248, ${0.4 + Math.sin(t*10)*0.2})`;
             ctx.lineWidth = 2;
@@ -169,7 +156,6 @@ export class Enemy extends Entity {
         this.health = hp;
         this.maxHealth = hp;
         
-        // 根据类型微调物理参数
         switch(type) {
             case EntityType.ENEMY_BOSS: this.radius = 80; this.friction = 0.98; break;
             case EntityType.ENEMY_TANK: this.radius = 40; this.friction = 0.96; break;
@@ -179,7 +165,6 @@ export class Enemy extends Entity {
     }
 
     draw(ctx: CanvasRenderingContext2D) {
-        // 委托给 EnemyModel 进行复杂渲染
         EnemyModel.draw(ctx, this);
     }
 }
@@ -202,7 +187,7 @@ export class Bullet extends Entity {
         const speed = isEnemy ? 400 : 1200;
         this.velocity.x = Math.sin(angle) * speed;
         this.velocity.y = -Math.cos(angle) * speed;
-        this.friction = 1.0; // 子弹无阻力
+        this.friction = 1.0;
     }
 
     draw(ctx: CanvasRenderingContext2D) {
@@ -212,7 +197,6 @@ export class Bullet extends Entity {
         ctx.globalCompositeOperation = 'lighter';
 
         if (this.isEnemy) {
-            // 敌方：不稳定的等离子团 (红色)
             const pulse = 1 + Math.sin(performance.now() / 50) * 0.2;
             const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 10 * pulse);
             g.addColorStop(0, '#ffffff');
@@ -221,7 +205,6 @@ export class Bullet extends Entity {
             ctx.fillStyle = g;
             ctx.beginPath(); ctx.arc(0, 0, 10 * pulse, 0, Math.PI*2); ctx.fill();
         } else {
-            // 玩家：超高速光束 (流体青蓝)
             const len = 35;
             const w = 4;
             const g = ctx.createLinearGradient(0, -len, 0, len);
@@ -245,7 +228,6 @@ export class Bullet extends Entity {
  * ==========================================
  */
 
-// 基础粒子：运动模糊拉伸
 export class Particle extends Entity {
     public life: number;
     public maxLife: number;
@@ -272,7 +254,7 @@ export class Particle extends Entity {
     draw(ctx: CanvasRenderingContext2D) {
         const alpha = this.life / this.maxLife;
         const speed = Math.hypot(this.velocity.x, this.velocity.y);
-        const len = Math.min(speed * 0.08, 20); // 根据速度拉伸
+        const len = Math.min(speed * 0.08, 20);
         
         ctx.save();
         ctx.translate(this.position.x, this.position.y);
@@ -291,7 +273,6 @@ export class Particle extends Entity {
     }
 }
 
-// 冲击波：圆形扩散
 export class Shockwave extends Entity {
     public life: number = 0.5;
     public maxLife: number = 0.5;
@@ -323,8 +304,8 @@ export class Shockwave extends Entity {
     }
 }
 
-// 蓄力特效
-export class Charge extends Entity {
+// [修复] 此类重命名为 ChargeParticle 以匹配 GameEngine 的导入
+export class ChargeParticle extends Entity {
     public life: number = 1.0;
     
     constructor(x: number, y: number) { super(x, y, 0); }
@@ -339,7 +320,7 @@ export class Charge extends Entity {
         ctx.save();
         ctx.translate(this.position.x, this.position.y);
         ctx.globalCompositeOperation = 'lighter';
-        // 简单的向内吸入效果
+        // 向内吸入的粒子效果
         for(let i=0; i<4; i++) {
             const angle = (t/200) + (Math.PI*2 * i / 4);
             const r = 20 * this.life;
@@ -352,7 +333,6 @@ export class Charge extends Entity {
     }
 }
 
-// 浮动文字 (伤害显示)
 export class FloatingText extends Entity {
     public text: string;
     public color: string;
@@ -362,7 +342,7 @@ export class FloatingText extends Entity {
         super(x, y, 0);
         this.text = text;
         this.color = color;
-        this.velocity.y = -60; // 向上飘
+        this.velocity.y = -60;
     }
 
     update(dt: number) {
@@ -390,7 +370,6 @@ export class FloatingText extends Entity {
  * ==========================================
  */
 
-// 背景星辰
 export class Star extends Entity {
     private brightness: number;
     private size: number;
@@ -399,7 +378,7 @@ export class Star extends Entity {
         super(x, y, 0);
         this.size = Math.random() * 2 + 0.5;
         this.brightness = Math.random();
-        this.velocity.y = 10 + Math.random() * 80; // 视差滚动
+        this.velocity.y = 10 + Math.random() * 80;
     }
 
     draw(ctx: CanvasRenderingContext2D) {
@@ -410,14 +389,19 @@ export class Star extends Entity {
     }
 }
 
-// 陨石 (Space Debris)
 export class Meteor extends Entity {
     private rotSpeed: number;
+    private drawPoints: number[]; // 缓存顶点防止闪烁
 
     constructor(x: number, y: number) {
         super(x, y, 15 + Math.random() * 20);
         this.velocity = { x: (Math.random() - 0.5) * 50, y: 100 + Math.random() * 100 };
         this.rotSpeed = (Math.random() - 0.5) * 2;
+        // 生成固定的形状顶点
+        this.drawPoints = [];
+        for(let i=0; i<6; i++) {
+             this.drawPoints.push(this.radius * (0.8 + Math.random()*0.4));
+        }
     }
 
     update(dt: number) {
@@ -432,10 +416,9 @@ export class Meteor extends Entity {
         
         ctx.fillStyle = '#475569';
         ctx.beginPath();
-        // 绘制不规则多边形
         for(let i=0; i<6; i++) {
             const angle = (Math.PI * 2 * i) / 6;
-            const r = this.radius * (0.8 + Math.random()*0.4); // 随机抖动半径
+            const r = this.drawPoints[i];
             ctx.lineTo(Math.cos(angle)*r, Math.sin(angle)*r);
         }
         ctx.closePath();
@@ -444,14 +427,13 @@ export class Meteor extends Entity {
     }
 }
 
-// 遥远星云 (Atmosphere)
 export class Nebula extends Entity {
     private color: string;
 
     constructor(x: number, y: number, color: string = '#4c1d95') {
         super(x, y, 150 + Math.random() * 150);
         this.color = color;
-        this.velocity.y = 15; // 极慢背景
+        this.velocity.y = 15;
     }
 
     draw(ctx: CanvasRenderingContext2D) {
@@ -473,7 +455,7 @@ export class Nebula extends Entity {
  * ==========================================
  */
 export class Item extends Entity {
-    public type: string; // 'upgrade', 'heal', etc.
+    public type: string; // 'upgrade', 'heal'
 
     constructor(x: number, y: number, type: string) {
         super(x, y, 15);
@@ -485,14 +467,12 @@ export class Item extends Entity {
         const t = performance.now() / 1000;
         ctx.save();
         ctx.translate(this.position.x, this.position.y);
-        ctx.rotate(Math.sin(t) * 0.5); // 轻轻摇摆
+        ctx.rotate(Math.sin(t) * 0.5);
 
-        // 旋转方块
         ctx.strokeStyle = '#fbbf24';
         ctx.lineWidth = 2;
         ctx.strokeRect(-10, -10, 20, 20);
         
-        // 内部发光
         ctx.globalCompositeOperation = 'lighter';
         ctx.fillStyle = `rgba(251, 191, 36, ${0.4 + Math.sin(t*5)*0.2})`;
         ctx.fillRect(-8, -8, 16, 16);
@@ -501,7 +481,6 @@ export class Item extends Entity {
     }
 }
 
-// 占位符类 (如果 Shield 需要独立实体逻辑)
 export class Shield extends Entity {
     public life: number = 1.0;
     constructor(x: number, y: number) { super(x, y, 30); }
