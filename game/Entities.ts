@@ -1,306 +1,506 @@
-import { EntityType } from "../types";
-import { EnemyModel } from "./EnemyModel";
+import { EntityType, ItemType, Vector2, WeaponType, SkillCooldown } from "../types";
 
-/**
- * 【安全护航】生产环境数值保护
- */
-const Safe = {
-    n: (v: any, def = 0) => (isFinite(v) && !isNaN(v) ? v : def),
-    off: (v: number) => Math.max(0, Math.min(1, isFinite(v) ? v : 0))
-};
+export class Entity {
+    position: Vector2;
+    velocity: Vector2 = { x: 0, y: 0 };
+    acceleration: Vector2 = { x: 0, y: 0 };
+    radius: number = 10;
+    rotation: number = 0;
+    type: EntityType;
+    markedForDeletion: boolean = false;
 
-export abstract class Entity {
-    public id: string = crypto.randomUUID();
-    public position: { x: number; y: number };
-    public velocity: { x: number; y: number } = { x: 0, y: 0 };
-    public acceleration: { x: number; y: number } = { x: 0, y: 0 };
-    public radius: number;
-    public rotation: number = 0;
-    public isDead: boolean = false;
-    protected friction: number = 0.95;
-
-    constructor(x: number, y: number, radius: number) {
-        this.position = { x: Safe.n(x), y: Safe.n(y) };
-        this.radius = Safe.n(radius, 1);
+    constructor(x: number, y: number, type: EntityType) {
+        this.position = { x, y };
+        this.type = type;
     }
 
-    update(dt: number) {
-        const _dt = Safe.n(dt, 0.016);
-        this.velocity.x += this.acceleration.x * _dt;
-        this.velocity.y += this.acceleration.y * _dt;
-        const damping = Math.pow(this.friction, _dt * 60);
-        this.velocity.x *= damping;
-        this.velocity.y *= damping;
-        this.position.x += this.velocity.x * _dt;
-        this.position.y += this.velocity.y * _dt;
-        this.acceleration = { x: 0, y: 0 };
+    update(dt: number, targetPos?: Vector2) {
+        this.velocity.x += this.acceleration.x * dt;
+        this.velocity.y += this.acceleration.y * dt;
+        this.position.x += this.velocity.x * dt;
+        this.position.y += this.velocity.y * dt;
+        this.acceleration.x = 0;
+        this.acceleration.y = 0;
     }
-
-    abstract draw(ctx: CanvasRenderingContext2D): void;
 }
 
 /**
- * 1. 玩家战机 - 保持最高工艺标准
+ * 玩家战机
  */
 export class Player extends Entity {
-    public health = 100; public maxHealth = 100; public energy = 100;
-    public weaponLevel = 1; public shieldActive = false;
-    public shield = { value: 100, max: 100, active: false };
+    health: number = 100;
+    maxHealth: number = 100;
+    mana: number = 100;
+    maxMana: number = 100;
+    manaRegen: number = 8; // mana per second
 
-    constructor(x: number, y: number) { super(x, y, 22); this.friction = 0.92; }
+    thrust: number = 2000;
+    friction: number = 0.88;
+
+    level: number = 1;
+    xp: number = 0;
+    xpToNext: number = 100;
+
+    currentWeapon: WeaponType = WeaponType.VULCAN;
+    weaponOrder: WeaponType[] = [
+        WeaponType.VULCAN,
+        WeaponType.LASER,
+        WeaponType.PLASMA,
+        WeaponType.TESLA,
+        WeaponType.BOMB
+    ];
+    damageMultiplier: number = 1;
+
+    fireRate: number = 90; // ms between vulcan shots
+    lastShotTime: number = 0;
+
+    chargeLevel: number = 0;
+    chargeRate: number = 80; // per second
+    isCharging: boolean = false;
+
+    shieldActive: boolean = false; // used by PlayerModel
+
+    skills: {
+        shield: SkillCooldown;
+        blackhole: SkillCooldown;
+        shockwave: SkillCooldown;
+    } = {
+        shield:    { current: 0, max: 12, active: false, duration: 4, activeTimer: 0 },
+        blackhole: { current: 0, max: 18, active: false },
+        shockwave: { current: 0, max: 8,  active: false }
+    };
+
+    constructor(x: number, y: number) {
+        super(x, y, EntityType.PLAYER);
+        this.radius = 22;
+    }
 
     update(dt: number) {
-        super.update(dt);
-        this.shield.active = this.shieldActive;
-        const bank = Safe.n(this.velocity.x / 600 * 0.45);
-        this.rotation += (bank - this.rotation) * Safe.n(dt) * 10;
+        // apply acceleration
+        this.velocity.x += this.acceleration.x * dt;
+        this.velocity.y += this.acceleration.y * dt;
+        // friction
+        this.velocity.x *= Math.pow(this.friction, dt * 60);
+        this.velocity.y *= Math.pow(this.friction, dt * 60);
+        // move
+        this.position.x += this.velocity.x * dt;
+        this.position.y += this.velocity.y * dt;
+        this.acceleration.x = 0;
+        this.acceleration.y = 0;
+
+        // player rotation stays at 0 (PlayerModel handles visual banking based on velocity)
+        this.rotation = 0;
+
+        // mana regen
+        this.mana = Math.min(this.maxMana, this.mana + this.manaRegen * dt);
+
+        // skill cooldowns
+        const skills: ('shield' | 'blackhole' | 'shockwave')[] = ['shield', 'blackhole', 'shockwave'];
+        for (const k of skills) {
+            const s = this.skills[k];
+            if (s.current > 0) s.current = Math.max(0, s.current - dt);
+        }
+
+        // shield active timer
+        if (this.skills.shield.active && this.skills.shield.activeTimer !== undefined) {
+            this.skills.shield.activeTimer -= dt;
+            if (this.skills.shield.activeTimer <= 0) {
+                this.skills.shield.active = false;
+            }
+        }
+        this.shieldActive = this.skills.shield.active;
     }
 
-    draw(ctx: CanvasRenderingContext2D) {
-        const { x, y } = this.position;
-        const t = performance.now() / 1000;
-        ctx.save();
-        ctx.translate(Safe.n(x), Safe.n(y));
-        ctx.rotate(Safe.n(this.rotation));
-
-        // 推进器 (马赫环)
-        const p = 1 + Math.sin(t * 30) * 0.1;
-        this.drawPlume(ctx, 0, 18, 8, 35 * p, '#0ea5e9');
-        this.drawPlume(ctx, -14, 12, 4, 18 * p, '#38bdf8');
-        this.drawPlume(ctx, 14, 12, 4, 18 * p, '#38bdf8');
-
-        // 主体装甲 (钛金质感)
-        const g = ctx.createLinearGradient(-15, -20, 15, 20);
-        g.addColorStop(0, '#f8fafc'); g.addColorStop(0.5, '#64748b'); g.addColorStop(1, '#0f172a');
-        ctx.fillStyle = g;
-        ctx.beginPath(); ctx.moveTo(0,-30); ctx.lineTo(12,10); ctx.lineTo(0,16); ctx.lineTo(-12,10); ctx.fill();
-
-        if (this.shieldActive) this.drawShieldRing(ctx, t);
-        ctx.restore();
+    switchWeapon() {
+        const idx = this.weaponOrder.indexOf(this.currentWeapon);
+        this.currentWeapon = this.weaponOrder[(idx + 1) % this.weaponOrder.length];
+        // reset charge
+        this.chargeLevel = 0;
+        this.isCharging = false;
     }
 
-    private drawPlume(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, col: string) {
-        if (h <= 0) return;
-        ctx.save(); ctx.globalCompositeOperation = 'lighter';
-        const g = ctx.createLinearGradient(x, y, x, y + h);
-        g.addColorStop(0, '#fff'); g.addColorStop(Safe.off(0.4), col); g.addColorStop(1, 'transparent');
-        ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(x, y+h/2, w, h/2, 0, 0, Math.PI*2); ctx.fill();
-        ctx.restore();
-    }
-
-    private drawShieldRing(ctx: CanvasRenderingContext2D, t: number) {
-        ctx.save(); ctx.globalCompositeOperation = 'lighter';
-        ctx.strokeStyle = `rgba(56, 189, 248, ${0.4 + Math.sin(t*10)*0.2})`;
-        ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0,0,38,0,Math.PI*2); ctx.stroke();
-        ctx.restore();
+    gainXp(amount: number) {
+        this.xp += amount;
+        while (this.xp >= this.xpToNext) {
+            this.xp -= this.xpToNext;
+            this.level++;
+            this.xpToNext = Math.floor(this.xpToNext * 1.5);
+            this.damageMultiplier += 0.15;
+            this.maxHealth += 10;
+            this.health = Math.min(this.maxHealth, this.health + 30);
+            this.maxMana += 10;
+        }
     }
 }
 
 /**
- * 2. 敌机 - 桥接 EnemyModel
+ * 敌机
  */
 export class Enemy extends Entity {
-    public health: number; public maxHealth: number; public type: EntityType;
-    constructor(x: number, y: number, type: EntityType, hp: number = 100) {
-        super(x, y, 20); this.type = type; this.health = hp; this.maxHealth = hp;
-    }
-    draw(ctx: CanvasRenderingContext2D) { EnemyModel.draw(ctx, this); }
-}
+    health: number;
+    maxHealth: number;
+    scoreValue: number;
+    isBoss: boolean;
+    fireTimer: number;
+    fireRate: number;
+    speed: number;
 
-/**
- * 3. 道具 (Item) - 全息浮空晶体
- */
-export class Item extends Entity {
-    constructor(x: number, y: number, public itemType: string) {
-        super(x, y, 15);
-        this.velocity.y = 80;
-    }
-    draw(ctx: CanvasRenderingContext2D) {
-        const t = performance.now() / 1000;
-        const { x, y } = this.position;
-        ctx.save();
-        ctx.translate(x, y);
-        ctx.rotate(t);
-        
-        // 外部全息框
-        ctx.strokeStyle = '#facc15';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(-12, -12, 24, 24);
-        
-        // 内部旋转核心
-        ctx.rotate(-t * 2);
-        const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 10);
-        g.addColorStop(0, '#fff'); g.addColorStop(1, '#eab308');
-        ctx.fillStyle = g;
-        ctx.fillRect(-6, -6, 12, 12);
-        
-        // 底部光效
-        ctx.globalCompositeOperation = 'lighter';
-        ctx.fillStyle = `rgba(250, 204, 21, ${0.2 + Math.sin(t*5)*0.1})`;
-        ctx.beginPath(); ctx.arc(0, 0, 20, 0, Math.PI*2); ctx.fill();
-        ctx.restore();
-    }
-}
+    constructor(x: number, y: number, difficulty: number = 1, isBoss: boolean = false) {
+        // pick enemy type
+        let type = EntityType.ENEMY_BASIC;
+        if (!isBoss) {
+            const roll = Math.random();
+            if (roll < 0.15) type = EntityType.ENEMY_TANK;
+            else if (roll < 0.4) type = EntityType.ENEMY_FAST;
+            else if (roll < 0.55) type = EntityType.ENEMY_KAMIKAZE;
+            else type = EntityType.ENEMY_BASIC;
+        } else {
+            type = EntityType.ENEMY_BOSS;
+        }
 
-/**
- * 4. 冲击波 (Shockwave) - 能量扩散圈
- */
-export class Shockwave extends Entity {
-    public life = 1.0;
-    constructor(x: number, y: number, public maxRadius: number) { super(x, y, 0); }
-    update(dt: number) { this.life -= dt * 2; if (this.life <= 0) this.isDead = true; }
-    draw(ctx: CanvasRenderingContext2D) {
-        const { x, y } = this.position;
-        const radius = (1 - this.life) * this.maxRadius;
-        ctx.save();
-        ctx.globalCompositeOperation = 'lighter';
-        ctx.strokeStyle = `rgba(255, 255, 255, ${this.life})`;
-        ctx.lineWidth = 4 * this.life;
-        ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI*2); ctx.stroke();
-        
-        // 内层光环
-        ctx.strokeStyle = `rgba(56, 189, 248, ${this.life * 0.5})`;
-        ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.arc(x, y, radius * 0.8, 0, Math.PI*2); ctx.stroke();
-        ctx.restore();
-    }
-}
+        super(x, y, type);
+        this.isBoss = isBoss;
 
-/**
- * 5. 浮动文字 (FloatingText) - 伤害与提示文字
- */
-export class FloatingText extends Entity {
-    public life = 1.0;
-    constructor(x: number, y: number, public text: string, public color: string) {
-        super(x, y, 0);
-        this.velocity.y = -60;
-    }
-    update(dt: number) { super.update(dt); this.life -= dt; if (this.life <= 0) this.isDead = true; }
-    draw(ctx: CanvasRenderingContext2D) {
-        ctx.save();
-        ctx.globalAlpha = Safe.off(this.life);
-        ctx.fillStyle = this.color;
-        ctx.font = "bold 20px 'Exo 2', sans-serif";
-        ctx.textAlign = "center";
-        // 简单描边增强可读性
-        ctx.strokeStyle = 'black';
-        ctx.lineWidth = 3;
-        ctx.strokeText(this.text, this.position.x, this.position.y);
-        ctx.fillText(this.text, this.position.x, this.position.y);
-        ctx.restore();
-    }
-}
+        if (isBoss) {
+            this.radius = 100;
+            this.health = 4000 * difficulty;
+            this.scoreValue = 1500;
+            this.fireRate = 1.2;
+            this.speed = 40;
+        } else if (type === EntityType.ENEMY_TANK) {
+            this.radius = 32;
+            this.health = 300 * difficulty;
+            this.scoreValue = 150;
+            this.fireRate = 2.2;
+            this.speed = 70;
+        } else if (type === EntityType.ENEMY_FAST) {
+            this.radius = 20;
+            this.health = 60 * difficulty;
+            this.scoreValue = 80;
+            this.fireRate = 1.3;
+            this.speed = 240;
+        } else if (type === EntityType.ENEMY_KAMIKAZE) {
+            this.radius = 22;
+            this.health = 80 * difficulty;
+            this.scoreValue = 100;
+            this.fireRate = 999; // doesn't fire
+            this.speed = 320;
+        } else {
+            this.radius = 24;
+            this.health = 120 * difficulty;
+            this.scoreValue = 50;
+            this.fireRate = 1.8;
+            this.speed = 120;
+        }
 
-/**
- * 6. 蓄力粒子 (ChargeParticle) - 向内吸入效果
- */
-export class ChargeParticle extends Entity {
-    public life = 1.0;
-    private startDist: number;
-    private angle: number;
-
-    constructor(x: number, y: number) {
-        super(x, y, 0);
-        this.angle = Math.random() * Math.PI * 2;
-        this.startDist = 40 + Math.random() * 40;
+        this.maxHealth = this.health;
+        this.fireTimer = this.fireRate * (0.5 + Math.random() * 0.5);
+        // initial downward velocity
+        this.velocity.y = this.speed;
     }
-    update(dt: number) { this.life -= dt * 1.5; if (this.life <= 0) this.isDead = true; }
-    draw(ctx: CanvasRenderingContext2D) {
-        const dist = this.life * this.startDist;
-        const px = this.position.x + Math.cos(this.angle) * dist;
-        const py = this.position.y + Math.sin(this.angle) * dist;
-        
-        ctx.save();
-        ctx.globalCompositeOperation = 'lighter';
-        ctx.fillStyle = `rgba(56, 189, 248, ${1 - this.life})`;
-        ctx.beginPath(); ctx.arc(px, py, 2, 0, Math.PI*2); ctx.fill();
-        ctx.restore();
+
+    update(dt: number, playerPos?: Vector2) {
+        // Boss hovers at top
+        if (this.isBoss) {
+            const targetY = 120;
+            if (this.position.y < targetY) {
+                this.velocity.y = 60;
+            } else {
+                this.velocity.y = 0;
+                // side-to-side drift
+                this.velocity.x = Math.sin(performance.now() / 1200) * 80;
+            }
+        } else if (this.type === EntityType.ENEMY_KAMIKAZE && playerPos) {
+            // homing
+            const dx = playerPos.x - this.position.x;
+            const dy = playerPos.y - this.position.y;
+            const d = Math.sqrt(dx * dx + dy * dy) || 1;
+            this.velocity.x = (dx / d) * this.speed;
+            this.velocity.y = (dy / d) * this.speed;
+        }
+
+        this.position.x += this.velocity.x * dt;
+        this.position.y += this.velocity.y * dt;
+
+        this.fireTimer -= dt;
+
+        // face the player roughly (pointing down by default)
+        this.rotation += dt * 0.5;
     }
 }
 
 /**
- * 7. 星云 (Nebula) - 巨大的远景云雾
- */
-export class Nebula extends Entity {
-    constructor(x: number, y: number, public color: string) {
-        super(x, y, 200 + Math.random() * 200);
-        this.velocity.y = 15;
-    }
-    draw(ctx: CanvasRenderingContext2D) {
-        const { x, y } = this.position;
-        ctx.save();
-        ctx.globalCompositeOperation = 'screen';
-        const g = ctx.createRadialGradient(x, y, 0, x, y, this.radius);
-        g.addColorStop(0, this.color);
-        g.addColorStop(1, 'transparent');
-        ctx.fillStyle = g;
-        ctx.globalAlpha = 0.12;
-        ctx.beginPath(); ctx.arc(x, y, this.radius, 0, Math.PI*2); ctx.fill();
-        ctx.restore();
-    }
-}
-
-/**
- * 8. 环境与其他 (Bullet, Particle, Star, Meteor, Shield)
+ * 子弹
  */
 export class Bullet extends Entity {
-    public isEnemy: boolean;
-    constructor(x: number, y: number, isEnemy: boolean) { super(x, y, 4); this.isEnemy = isEnemy; }
-    draw(ctx: CanvasRenderingContext2D) {
-        ctx.save(); ctx.translate(this.position.x, this.position.y); ctx.rotate(this.rotation);
-        ctx.globalCompositeOperation = 'lighter';
-        const col = this.isEnemy ? '#ff4444' : '#00f2ff';
-        const g = ctx.createLinearGradient(0, -15, 0, 15);
-        g.addColorStop(0, '#fff'); g.addColorStop(1, col);
-        ctx.fillStyle = g; ctx.fillRect(-2, -15, 4, 30);
-        ctx.restore();
+    damage: number = 20;
+    color: string = '#ffffff';
+    target: Entity | null = null;
+    angleOffset: number = 0;
+    owner: Player | null = null;
+
+    constructor(
+        x: number,
+        y: number,
+        isPlayerBullet: boolean,
+        weaponType: WeaponType = WeaponType.VULCAN,
+        angleOffset: number = 0,
+        rotation: number = 0,
+        owner: Player | null = null
+    ) {
+        super(x, y, isPlayerBullet ? EntityType.BULLET_PLAYER : EntityType.BULLET_ENEMY);
+        this.radius = 5;
+        this.angleOffset = angleOffset;
+        this.owner = owner;
+        this.rotation = rotation + angleOffset;
+
+        if (isPlayerBullet) {
+            const speed = 900;
+            this.velocity.x = Math.sin(this.rotation) * speed;
+            this.velocity.y = -Math.cos(this.rotation) * speed;
+            this.color = '#facc15';
+            this.damage = 25 * (owner ? owner.damageMultiplier : 1);
+        } else {
+            // enemy bullets get velocity set externally
+            this.color = '#ff4466';
+            this.damage = 10;
+            this.radius = 6;
+        }
+    }
+
+    update(dt: number) {
+        this.position.x += this.velocity.x * dt;
+        this.position.y += this.velocity.y * dt;
     }
 }
 
+/**
+ * 粒子
+ */
 export class Particle extends Entity {
-    public life = 1.0; constructor(x: number, y: number, public color: string) { super(x, y, 2); }
-    update(dt: number) { super.update(dt); this.life -= dt; if (this.life <= 0) this.isDead = true; }
-    draw(ctx: CanvasRenderingContext2D) {
-        const speed = Math.hypot(this.velocity.x, this.velocity.y);
-        const len = Math.min(speed * 0.1, 15);
-        ctx.save(); ctx.translate(this.position.x, this.position.y); ctx.rotate(Math.atan2(this.velocity.y, this.velocity.x));
-        ctx.globalAlpha = Safe.off(this.life); ctx.strokeStyle = this.color; ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(-len, 0); ctx.stroke(); ctx.restore();
+    life: number = 1;       // normalized 0..1 for rendering alpha
+    _timeLeft: number;
+    maxLife: number;
+    color: string;
+    size: number;
+
+    constructor(
+        x: number,
+        y: number,
+        color: string,
+        speed: number = 200,
+        life: number = 0.5,
+        size: number = 3
+    ) {
+        super(x, y, EntityType.PARTICLE);
+        this.color = color;
+        this._timeLeft = life;
+        this.maxLife = life;
+        this.size = size;
+        this.radius = size;
+        this.life = 1;
+
+        const angle = Math.random() * Math.PI * 2;
+        const s = speed * (0.3 + Math.random() * 0.7);
+        this.velocity.x = Math.cos(angle) * s;
+        this.velocity.y = Math.sin(angle) * s;
+    }
+
+    update(dt: number) {
+        this._timeLeft -= dt;
+        if (this._timeLeft <= 0) { this.markedForDeletion = true; return; }
+        this.life = Math.max(0, this._timeLeft / this.maxLife);
+        // drag
+        this.velocity.x *= 0.95;
+        this.velocity.y *= 0.95;
+        this.position.x += this.velocity.x * dt;
+        this.position.y += this.velocity.y * dt;
+        // fade size slightly
+        this.size *= 0.99;
     }
 }
 
+/**
+ * 星星背景
+ */
 export class Star extends Entity {
-    private sz = Math.random() * 2;
-    constructor(x: number, y: number) { super(x, y, 0); this.velocity.y = 20 + Math.random()*100; }
-    draw(ctx: CanvasRenderingContext2D) {
-        ctx.fillStyle = `rgba(255,255,255,${0.2 + Math.random()*0.4})`;
-        ctx.fillRect(this.position.x, this.position.y, this.sz, this.sz);
+    brightness: number;
+
+    constructor(screenWidth: number, screenHeight: number) {
+        super(Math.random() * screenWidth, Math.random() * screenHeight, EntityType.STAR);
+        this.radius = Math.random() * 1.5 + 0.3;
+        this.brightness = 0.3 + Math.random() * 0.7;
+        this.velocity.y = 20 + Math.random() * 60;
+    }
+
+    update(dt: number) {
+        this.position.y += this.velocity.y * dt;
     }
 }
 
+/**
+ * 流星
+ */
 export class Meteor extends Entity {
-    private pts: number[] = [];
-    constructor(x: number, y: number) {
-        super(x, y, 15 + Math.random()*15); this.velocity.y = 100;
-        for(let i=0; i<8; i++) this.pts.push(this.radius * (0.8 + Math.random()*0.4));
+    constructor(screenWidth: number, screenHeight: number) {
+        super(Math.random() * screenWidth, -50, EntityType.STAR);
+        this.radius = 6 + Math.random() * 12;
+        this.velocity.y = 250 + Math.random() * 150;
+        this.velocity.x = (Math.random() - 0.5) * 60;
+        this.rotation = Math.random() * Math.PI;
     }
-    draw(ctx: CanvasRenderingContext2D) {
-        ctx.save(); ctx.translate(this.position.x, this.position.y); ctx.fillStyle = '#4b5563';
-        ctx.beginPath(); this.pts.forEach((r, i) => {
-            const a = (i/8)*Math.PI*2; ctx.lineTo(Math.cos(a)*r, Math.sin(a)*r);
-        });
-        ctx.closePath(); ctx.fill(); ctx.restore();
+
+    update(dt: number) {
+        this.position.x += this.velocity.x * dt;
+        this.position.y += this.velocity.y * dt;
+        this.rotation += dt * 2;
     }
 }
 
+/**
+ * 星云
+ */
+export class Nebula extends Entity {
+    scale: number;
+    color: string;
+
+    constructor(screenWidth: number, screenHeight: number) {
+        super(Math.random() * screenWidth, Math.random() * screenHeight, EntityType.NEBULA);
+        this.scale = 250 + Math.random() * 250;
+        const palette = ['#7c3aed', '#0ea5e9', '#db2777', '#6366f1', '#06b6d4'];
+        this.color = palette[Math.floor(Math.random() * palette.length)];
+        this.velocity.y = 8 + Math.random() * 10;
+    }
+
+    update(dt: number) {
+        this.position.y += this.velocity.y * dt;
+    }
+}
+
+/**
+ * 道具
+ */
+export class Item extends Entity {
+    itemType: ItemType;
+    wobble: number = 0;
+
+    constructor(x: number, y: number) {
+        super(x, y, EntityType.ITEM);
+        this.radius = 16;
+        this.velocity.y = 80;
+        // random type
+        const r = Math.random();
+        if (r < 0.45) this.itemType = ItemType.HEALTH;
+        else if (r < 0.8) this.itemType = ItemType.MANA;
+        else this.itemType = ItemType.WEAPON_UP;
+    }
+
+    update(dt: number) {
+        this.position.y += this.velocity.y * dt;
+        this.wobble += dt * 2;
+    }
+}
+
+/**
+ * 护盾 (玩家技能)
+ */
 export class Shield extends Entity {
-    public life = 1.0;
-    constructor(x: number, y: number, radius: number) { super(x, y, radius); }
-    draw(ctx: CanvasRenderingContext2D) {
-        // 独立护盾实体的绘制 (如掉落的护盾球)
-        ctx.save();
-        ctx.strokeStyle = '#0ea5e9'; ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.arc(this.position.x, this.position.y, this.radius, 0, Math.PI*2); ctx.stroke();
-        ctx.restore();
+    owner: Player;
+    life: number = 4;
+
+    constructor(owner: Player) {
+        super(owner.position.x, owner.position.y, EntityType.SKILL_SHIELD);
+        this.owner = owner;
+        this.radius = 55;
+    }
+
+    update(dt: number) {
+        if (this.owner.markedForDeletion || !this.owner.skills.shield.active) {
+            this.markedForDeletion = true;
+            return;
+        }
+        // follow owner
+        this.position.x = this.owner.position.x;
+        this.position.y = this.owner.position.y;
+    }
+}
+
+/**
+ * 冲击波
+ */
+export class Shockwave extends Entity {
+    life: number = 0.8;
+    maxLife: number = 0.8;
+    maxRadius: number = 600;
+    opacity: number = 1;
+
+    constructor(x: number, y: number) {
+        super(x, y, EntityType.SKILL_SHOCKWAVE);
+        this.radius = 10;
+    }
+
+    update(dt: number) {
+        this.life -= dt;
+        if (this.life <= 0) { this.markedForDeletion = true; return; }
+        const t = 1 - (this.life / this.maxLife);
+        this.radius = t * this.maxRadius;
+        this.opacity = this.life / this.maxLife;
+    }
+}
+
+/**
+ * 浮动文字
+ */
+export class FloatingText extends Entity {
+    life: number = 1;
+    maxLife: number = 1;
+    text: string;
+    color: string;
+
+    constructor(x: number, y: number, text: string, color: string) {
+        super(x, y, EntityType.FLOATING_TEXT);
+        this.text = text;
+        this.color = color;
+        this.velocity.y = -60;
+    }
+
+    update(dt: number) {
+        this.life -= dt;
+        if (this.life <= 0) { this.markedForDeletion = true; return; }
+        this.position.y += this.velocity.y * dt;
+        this.velocity.y *= 0.95;
+    }
+}
+
+/**
+ * 蓄力粒子 (激光武器充能时)
+ */
+export class ChargeParticle extends Entity {
+    target: Player;
+    life: number = 0.6;
+    maxLife: number = 0.6;
+    startDist: number;
+    angle: number;
+
+    constructor(target: Player) {
+        super(target.position.x, target.position.y, EntityType.CHARGE_PARTICLE);
+        this.target = target;
+        this.radius = 2 + Math.random() * 2;
+        this.angle = Math.random() * Math.PI * 2;
+        this.startDist = 60 + Math.random() * 40;
+    }
+
+    update(dt: number) {
+        this.life -= dt;
+        if (this.life <= 0 || this.target.markedForDeletion) {
+            this.markedForDeletion = true;
+            return;
+        }
+        // spiral in toward target
+        const t = this.life / this.maxLife;
+        const d = this.startDist * t;
+        this.angle += dt * 6;
+        this.position.x = this.target.position.x + Math.cos(this.angle) * d;
+        this.position.y = this.target.position.y - 30 + Math.sin(this.angle) * d;
     }
 }
