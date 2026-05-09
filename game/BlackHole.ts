@@ -1,272 +1,196 @@
 import { Entity } from "./Entities";
 import { EntityType } from "../types";
 
-class BHParticle {
+/**
+ * 黑洞技能 - 性能友好 & 视觉精炼版
+ *
+ * 核心设计：
+ *   - 中心是一个纯黑事件视界 + 明亮光子环
+ *   - 使用 2 条旋转渐变环 (accretion disk) 代替上万粒子
+ *   - 少量 (~80) 螺旋粒子做点缀，而不是密密麻麻
+ *   - 微量涟漪描边表示重力波
+ *
+ * 相比原先 15000 粒子/帧，绘制调用降低两个数量级
+ */
+
+class OrbitParticle {
     angle: number;
     distance: number;
+    baseDistance: number;
     speed: number;
     size: number;
     color: string;
-    alpha: number;
-    targetAlpha: number;
-    wobblePhase: number;
-    wobbleSpeed: number;
-    
-    constructor(maxRadius: number) {
-        this.reset(maxRadius, true);
-    }
-
-    reset(maxRadius: number, startFullAlpha: boolean = false) {
-        // --- 核心改动：极致压缩分布半径 ---
-        const r = Math.random();
-        // 指数调小 (0.8)，让更多粒子挤在内圈
-        const distributionCurve = Math.pow(r, 0.8); 
-        
-        const horizonRadius = 45; 
-        // 这里的 120 决定了吸积盘的宽度，只保留中心明亮区
-        const diskWidth = 120; 
-        
-        this.distance = horizonRadius + 2 + (distributionCurve * diskWidth);
-        this.angle = Math.random() * Math.PI * 2;
-        
-        // 极高转速，模拟中心高能区
-        const angularFactor = 550; 
-        this.speed = (angularFactor / this.distance) * (0.8 + Math.random() * 0.4);
-        
-        this.size = (Math.random() * 1.8) + 0.6;
-        this.wobblePhase = Math.random() * Math.PI * 2;
-        this.wobbleSpeed = Math.random() * 2 + 1;
-
-        // --- 核心改动：仅保留蓝白高亮色系 ---
-        const distNorm = (this.distance - horizonRadius) / diskWidth;
-        
-        if (distNorm < 0.25) {
-            // 最内圈：纯净白光
-            this.color = '255, 255, 255'; 
-            this.targetAlpha = 0.9 + Math.random() * 0.1;
-        } else if (distNorm < 0.7) {
-            // 中圈：亮青色 (Vibrant Cyan)
-            this.color = Math.random() > 0.4 ? '100, 240, 255' : '50, 180, 255';
-            this.targetAlpha = 0.8 + Math.random() * 0.2;
-        } else {
-            // 外圈过渡：深蓝色 (Deep Blue)
-            this.color = '30, 100, 255';
-            this.targetAlpha = 0.4 + Math.random() * 0.4;
-        }
-        
-        this.alpha = startFullAlpha ? this.targetAlpha : 0;
-    }
-
-    update(dt: number, maxRadius: number) {
-        this.angle += this.speed * dt; 
-        this.wobblePhase += this.wobbleSpeed * dt;
-        
-        // 极强的中心吸力
-        const suction = (2200 / this.distance);
-        this.distance -= suction * dt; 
-        
-        if (this.alpha < this.targetAlpha) {
-            this.alpha += dt * 2.0; 
-        }
-
-        // 越过视界后重生
-        if (this.distance < 42) {
-            this.reset(maxRadius, false);
-        }
-    }
-}
-
-/**
- * 空间涟漪 (微弱的扰动效果)
- */
-class SpaceRipple {
-    radius: number;
-    maxRadius: number;
     life: number;
     maxLife: number;
 
-    constructor(startRadius: number) {
-        this.radius = startRadius;
-        this.maxRadius = startRadius + 200;
-        this.life = 1.0;
-        this.maxLife = 1.0;
+    constructor() {
+        this.angle = Math.random() * Math.PI * 2;
+        this.baseDistance = 80 + Math.random() * 90;
+        this.distance = this.baseDistance;
+        this.speed = (260 / this.distance) * (0.9 + Math.random() * 0.3);
+        this.size = Math.random() * 1.8 + 0.8;
+        this.maxLife = 1.2 + Math.random() * 0.8;
+        this.life = Math.random() * this.maxLife;
+
+        // Cool accretion colours
+        const roll = Math.random();
+        if (roll < 0.55) this.color = '140, 230, 255';        // cyan
+        else if (roll < 0.85) this.color = '90, 170, 255';    // mid blue
+        else this.color = '255, 255, 255';                    // bright
     }
 
     update(dt: number) {
-        this.radius += 300 * dt; 
-        this.life -= dt * 1.2;
+        this.angle += this.speed * dt;
+        this.life -= dt;
+        // slow inward drift
+        this.distance -= dt * 18;
+        if (this.life <= 0 || this.distance < 44) {
+            this.angle = Math.random() * Math.PI * 2;
+            this.baseDistance = 80 + Math.random() * 90;
+            this.distance = this.baseDistance;
+            this.life = this.maxLife;
+        }
     }
 }
 
 export class BlackHole extends Entity {
-    life: number = 8.0; 
-    
-    // --- 整体半径缩小，聚焦中心 ---
-    maxRadius: number = 220; 
-    pullRadius: number = 400; 
-    eventHorizonRadius: number = 45;
-    
-    particles: BHParticle[] = [];
-    // 维持 15000 个粒子，在更小的空间内会显得非常明亮
-    particleCount: number = 15000; 
-    
-    ripples: SpaceRipple[] = [];
-    rippleTimer: number = 0;
-    
+    life: number = 7.0;
+
+    maxRadius: number = 170;
+    pullRadius: number = 360;
+    eventHorizonRadius: number = 38;
+
+    particles: OrbitParticle[] = [];
+    particleCount: number = 80;
+
     spawnInTimer: number = 0;
     despawnTimer: number = 0;
     isDespawning: boolean = false;
-    
+
+    rippleTimer: number = 0;
+    ripples: Array<{ r: number; life: number }> = [];
+
     constructor(x: number, y: number) {
         super(x, y, EntityType.SKILL_BLACKHOLE);
-        this.radius = 10; 
-        
-        for(let i=0; i<this.particleCount; i++) {
-            this.particles.push(new BHParticle(this.maxRadius));
+        this.radius = 10;
+        for (let i = 0; i < this.particleCount; i++) {
+            this.particles.push(new OrbitParticle());
         }
     }
 
     update(dt: number) {
         if (!this.isDespawning) {
-            this.spawnInTimer += dt;
-            if (this.radius < this.maxRadius * 0.8) {
-                this.radius += dt * 250;
-            }
-            
+            this.spawnInTimer = Math.min(1, this.spawnInTimer + dt * 2);
+            if (this.radius < this.maxRadius) this.radius += dt * 200;
             this.life -= dt;
-            if (this.life <= 0) {
-                this.isDespawning = true;
-            }
+            if (this.life <= 0) this.isDespawning = true;
         } else {
             this.despawnTimer += dt;
-            this.radius -= dt * 400;
-            if (this.despawnTimer > 1.0) {
-                this.markedForDeletion = true;
-            }
-        }
-        
-        const currentMaxR = this.isDespawning ? this.maxRadius * (1 - this.despawnTimer) : this.maxRadius;
-        for (const p of this.particles) {
-            p.update(dt, currentMaxR);
+            if (this.despawnTimer > 0.8) this.markedForDeletion = true;
         }
 
+        for (const p of this.particles) p.update(dt);
+
+        // ripples
         this.rippleTimer += dt;
-        if (this.rippleTimer > 0.5 && !this.isDespawning) { 
+        if (this.rippleTimer > 0.9 && !this.isDespawning) {
             this.rippleTimer = 0;
-            this.ripples.push(new SpaceRipple(this.eventHorizonRadius));
+            this.ripples.push({ r: this.eventHorizonRadius * 1.2, life: 1 });
         }
-        
         for (let i = this.ripples.length - 1; i >= 0; i--) {
             const r = this.ripples[i];
-            r.update(dt);
-            if (r.life <= 0) {
-                this.ripples.splice(i, 1);
-            }
+            r.r += dt * 180;
+            r.life -= dt * 0.7;
+            if (r.life <= 0) this.ripples.splice(i, 1);
         }
 
-        this.position.y -= 3 * dt; 
+        // drift upward slowly
+        this.position.y -= 4 * dt;
     }
 
     static draw(ctx: CanvasRenderingContext2D, bh: BlackHole) {
         const { x, y } = bh.position;
-        
-        let scale = 1.0;
-        if (bh.spawnInTimer < 1.0) scale = Math.pow(bh.spawnInTimer, 0.5);
-        if (bh.isDespawning) scale = Math.max(0, 1.0 - bh.despawnTimer);
-        
+
+        // spawn/despawn scale
+        let scale = bh.spawnInTimer;
+        if (bh.isDespawning) scale = Math.max(0, 1 - bh.despawnTimer / 0.8);
         if (scale <= 0.01) return;
 
         ctx.save();
         ctx.translate(x, y);
         ctx.scale(scale, scale);
 
-        // --- LAYER 1: 中心背景阴影 (缩小范围) ---
-        ctx.save();
-        ctx.globalCompositeOperation = 'source-over';
-        const lensRadius = bh.eventHorizonRadius * 3;
-        const lensGrad = ctx.createRadialGradient(0, 0, bh.eventHorizonRadius, 0, 0, lensRadius);
-        lensGrad.addColorStop(0, '#000000'); 
-        lensGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
-        
-        ctx.fillStyle = lensGrad;
-        ctx.beginPath();
-        ctx.arc(0, 0, lensRadius, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
+        const t = performance.now() * 0.0015;
+        const eh = bh.eventHorizonRadius;
+        const outer = bh.maxRadius;
 
-        // --- LAYER 2: 极亮吸积盘旋涡 ---
-        ctx.save();
+        // 1) Soft gravitational halo (one radial gradient, cheap)
         ctx.globalCompositeOperation = 'lighter';
-        
-        // 环境光晕也缩小，聚集在中心
-        const baseGlow = ctx.createRadialGradient(0, 0, bh.eventHorizonRadius, 0, 0, bh.maxRadius);
-        baseGlow.addColorStop(0, 'rgba(0, 100, 255, 0.4)');
-        baseGlow.addColorStop(1, 'rgba(0, 0, 0, 0)');
-        ctx.fillStyle = baseGlow;
+        const halo = ctx.createRadialGradient(0, 0, eh, 0, 0, outer);
+        halo.addColorStop(0, 'rgba(20, 90, 200, 0.55)');
+        halo.addColorStop(0.55, 'rgba(10, 60, 160, 0.18)');
+        halo.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = halo;
         ctx.beginPath();
-        ctx.arc(0, 0, bh.maxRadius, 0, Math.PI*2);
+        ctx.arc(0, 0, outer, 0, Math.PI * 2);
         ctx.fill();
 
-        for (const p of bh.particles) {
-            if (p.alpha <= 0.05) continue;
-
-            const xPos = Math.cos(p.angle) * p.distance;
-            const yPos = Math.sin(p.angle) * p.distance;
-
-            ctx.fillStyle = `rgba(${p.color}, ${p.alpha})`;
-            
-            // 绘制粒子
-            ctx.fillRect(xPos, yPos, p.size, p.size);
-            
-            // 短而密集的旋转拖尾
-            if (p.distance < 180) {
-                const trailAlpha = p.alpha * 0.4;
-                ctx.strokeStyle = `rgba(${p.color}, ${trailAlpha})`;
-                ctx.lineWidth = p.size;
-                ctx.beginPath();
-                ctx.moveTo(xPos, yPos);
-                
-                // 固定短拖尾长度，产生类似“拉丝”的液体质感
-                const trailLen = 12; 
-                const tx = xPos - Math.sin(p.angle) * trailLen; 
-                const ty = yPos + Math.cos(p.angle) * trailLen;
-                
-                ctx.lineTo(tx, ty);
-                ctx.stroke();
-            }
+        // 2) Accretion disk - two rotating bright arcs (very cheap, very pretty)
+        ctx.lineCap = 'round';
+        for (let i = 0; i < 2; i++) {
+            const rot = t * (1 + i * 0.35) + i * Math.PI;
+            const diskR = 70 + i * 18;
+            ctx.save();
+            ctx.rotate(rot);
+            ctx.strokeStyle = i === 0
+                ? 'rgba(180, 240, 255, 0.85)'
+                : 'rgba(90, 170, 255, 0.55)';
+            ctx.lineWidth = 6 - i * 2;
+            ctx.beginPath();
+            ctx.arc(0, 0, diskR, -Math.PI * 0.8, Math.PI * 0.2);
+            ctx.stroke();
+            ctx.restore();
         }
-        ctx.restore();
 
-        // --- LAYER 3: 事件视界 (黑洞本体) ---
-        ctx.save();
+        // 3) Orbit particles (~80)
+        for (const p of bh.particles) {
+            const px = Math.cos(p.angle) * p.distance;
+            const py = Math.sin(p.angle) * p.distance;
+            const alpha = Math.min(1, p.life / p.maxLife);
+            ctx.fillStyle = `rgba(${p.color}, ${alpha})`;
+            ctx.fillRect(px - p.size * 0.5, py - p.size * 0.5, p.size, p.size);
+        }
+
+        // 4) Ripples
         ctx.globalCompositeOperation = 'source-over';
-        
-        ctx.fillStyle = '#000000';
-        ctx.shadowColor = '#0088ff';
-        ctx.shadowBlur = 15; 
-        ctx.beginPath();
-        ctx.arc(0, 0, bh.eventHorizonRadius, 0, Math.PI * 2);
-        ctx.fill();
-        
-        // 强光光子环 (Photon Ring)
+        for (const r of bh.ripples) {
+            ctx.strokeStyle = `rgba(120, 200, 255, ${r.life * 0.35})`;
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.arc(0, 0, r.r, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+
+        // 5) Photon ring (bright cyan)
         ctx.globalCompositeOperation = 'lighter';
-        ctx.shadowBlur = 0;
-        
-        // 核心蓝环
-        ctx.strokeStyle = '#0ea5e9';
-        ctx.lineWidth = 5;
+        ctx.strokeStyle = 'rgba(120, 230, 255, 0.9)';
+        ctx.lineWidth = 4;
         ctx.beginPath();
-        ctx.arc(0, 0, bh.eventHorizonRadius + 1, 0, Math.PI * 2);
+        ctx.arc(0, 0, eh + 2, 0, Math.PI * 2);
         ctx.stroke();
-        
-        // 极细白环 (最亮边缘)
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 2;
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+        ctx.lineWidth = 1.5;
         ctx.beginPath();
-        ctx.arc(0, 0, bh.eventHorizonRadius - 0.5, 0, Math.PI * 2);
+        ctx.arc(0, 0, eh + 0.5, 0, Math.PI * 2);
         ctx.stroke();
-        
-        ctx.restore();
+
+        // 6) Event horizon - pure black disc (drawn last so nothing leaks through)
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.fillStyle = '#000000';
+        ctx.beginPath();
+        ctx.arc(0, 0, eh, 0, Math.PI * 2);
+        ctx.fill();
+
         ctx.restore();
     }
 }

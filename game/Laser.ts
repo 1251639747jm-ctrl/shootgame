@@ -2,47 +2,57 @@ import { Entity } from "./Entities";
 import { EntityType, Vector2 } from "../types";
 import { Player } from "./Entities";
 
-const LASER_THEME = {
-    COLORS: {
-        CORE: '#FFFFFF',
-        INNER: '#00FFFF',
-        OUTER: '#0033FF',
-        ELECTRIC: '#88FFFF',
-        SPARK: '#FFDD00'
-    },
-    STATS: {
-        BASE_DAMAGE: 160,
-        LENGTH: 2000,
-        WIDTH: 45,
-    },
-    PHASES: {
-        CHARGE: 0.2,
-        FIRE: 1.2,
-        DECAY: 0.3
-    }
+/**
+ * HYPER BEAM 激光 - 视觉重写版
+ *
+ * 视觉目标：
+ *   - 干净的三层光束：深蓝外晕 / 青色主体 / 纯白核心
+ *   - 发射点有能量汇聚球
+ *   - 束身微微脉动，末端有收束闪光
+ *   - 去掉色散错位、虚线流纹等杂乱元素
+ *   - 少量火花点缀
+ *
+ * 性能目标：
+ *   - 不使用 shadowBlur
+ *   - 每帧约 6~8 次 fillRect / arc，远低于原先
+ */
+
+const LASER = {
+    DAMAGE: 160,
+    LENGTH: 2000,
+    WIDTH: 42,
+    PHASE_CHARGE: 0.18,
+    PHASE_FIRE:   1.15,
+    PHASE_DECAY:  0.28,
+    COLOR_CORE:   '#ffffff',
+    COLOR_INNER:  '#6ef2ff',
+    COLOR_MID:    '#1f9bff',
+    COLOR_OUTER:  'rgba(20, 60, 200, 0.55)'
 };
 
-class LaserSpark {
+class Spark {
     x: number; y: number;
     vx: number; vy: number;
     life: number; maxLife: number;
     size: number;
-    
-    constructor(startX: number, startY: number, angle: number) {
-        this.x = startX;
-        this.y = startY;
-        const scatter = angle + (Math.random() - 0.5) * 1.5;
-        const speed = Math.random() * 600 + 200;
-        this.vx = Math.sin(scatter) * speed;
-        this.vy = -Math.cos(scatter) * speed;
-        this.maxLife = Math.random() * 0.4 + 0.1;
+
+    constructor(sx: number, sy: number, angle: number) {
+        this.x = sx;
+        this.y = sy;
+        const spread = angle + (Math.random() - 0.5) * 1.8;
+        const sp = Math.random() * 500 + 180;
+        this.vx = Math.sin(spread) * sp;
+        this.vy = -Math.cos(spread) * sp;
+        this.maxLife = Math.random() * 0.35 + 0.1;
         this.life = this.maxLife;
-        this.size = Math.random() * 3 + 1;
+        this.size = Math.random() * 2.2 + 0.8;
     }
-    
+
     update(dt: number) {
         this.x += this.vx * dt;
         this.y += this.vy * dt;
+        this.vx *= 0.92;
+        this.vy *= 0.92;
         this.life -= dt;
     }
 }
@@ -51,29 +61,29 @@ export class Laser extends Entity {
     owner: Player;
     timer: number = 0;
     phase: 'charge' | 'fire' | 'decay' = 'charge';
-    
+
     startPoint: Vector2 = { x: 0, y: 0 };
-    endPoint: Vector2 = { x: 0, y: 0 };
-    length: number = LASER_THEME.STATS.LENGTH;
+    length: number = LASER.LENGTH;
+    width: number = LASER.WIDTH * 0.5; // used for collision; becomes half the full beam width
     currentWidth: number = 0;
 
-    private sparks: LaserSpark[] = [];
-    private shakeIntensity: number = 0;
+    damage: number = 0;
+
+    private sparks: Spark[] = [];
+    private sparkTimer: number = 0;
 
     constructor(owner: Player) {
         super(owner.position.x, owner.position.y, EntityType.WEAPON_LASER);
         this.owner = owner;
         this.rotation = owner.rotation;
-        this.radius = LASER_THEME.STATS.WIDTH * 0.5;
+        this.radius = LASER.WIDTH * 0.5;
         this.updateGeometry();
     }
 
     private updateGeometry() {
         this.rotation = this.owner.rotation;
-        this.startPoint.x = this.owner.position.x + 45 * Math.sin(this.rotation);
-        this.startPoint.y = this.owner.position.y - 45 * Math.cos(this.rotation);
-        this.endPoint.x = this.startPoint.x + Math.sin(this.rotation) * this.length;
-        this.endPoint.y = this.startPoint.y - Math.cos(this.rotation) * this.length;
+        this.startPoint.x = this.owner.position.x + 40 * Math.sin(this.rotation);
+        this.startPoint.y = this.owner.position.y - 40 * Math.cos(this.rotation);
         this.position.x = this.startPoint.x;
         this.position.y = this.startPoint.y;
     }
@@ -87,134 +97,138 @@ export class Laser extends Entity {
         this.timer += dt;
         this.updateGeometry();
 
-        let damageMultiplier = 0;
+        let mult = 0;
+        const t = this.timer;
 
-        if (this.timer < LASER_THEME.PHASES.CHARGE) {
+        if (t < LASER.PHASE_CHARGE) {
             this.phase = 'charge';
-            const progress = this.timer / LASER_THEME.PHASES.CHARGE;
-            this.currentWidth = progress * 10;
-            this.shakeIntensity = progress * 2;
-        } else if (this.timer < LASER_THEME.PHASES.CHARGE + LASER_THEME.PHASES.FIRE) {
+            const p = t / LASER.PHASE_CHARGE;
+            this.currentWidth = 4 + p * 6;
+        } else if (t < LASER.PHASE_CHARGE + LASER.PHASE_FIRE) {
             this.phase = 'fire';
-            damageMultiplier = 1.0;
-            this.currentWidth = LASER_THEME.STATS.WIDTH + Math.sin(this.timer * 40) * 8;
-            this.shakeIntensity = 5;
-            
-            for(let i=0; i<3; i++) {
-                this.sparks.push(new LaserSpark(this.startPoint.x, this.startPoint.y, this.rotation));
-            }
-        } else if (this.timer < LASER_THEME.PHASES.CHARGE + LASER_THEME.PHASES.FIRE + LASER_THEME.PHASES.DECAY) {
+            mult = 1.0;
+            // subtle pulse
+            this.currentWidth = LASER.WIDTH + Math.sin(t * 24) * 4;
+        } else if (t < LASER.PHASE_CHARGE + LASER.PHASE_FIRE + LASER.PHASE_DECAY) {
             this.phase = 'decay';
-            const timeInDecay = this.timer - (LASER_THEME.PHASES.CHARGE + LASER_THEME.PHASES.FIRE);
-            const progress = 1 - (timeInDecay / LASER_THEME.PHASES.DECAY);
-            this.currentWidth = LASER_THEME.STATS.WIDTH * progress;
-            damageMultiplier = progress;
-            this.shakeIntensity = progress * 2;
+            const td = t - (LASER.PHASE_CHARGE + LASER.PHASE_FIRE);
+            const p = 1 - (td / LASER.PHASE_DECAY);
+            this.currentWidth = LASER.WIDTH * p;
+            mult = p;
         } else {
             this.markedForDeletion = true;
+            return;
         }
 
-        const levelBoost = 1 + (this.owner.level * 0.25);
-        (this as any).damage = LASER_THEME.STATS.BASE_DAMAGE * this.owner.damageMultiplier * levelBoost * damageMultiplier;
+        const levelBoost = 1 + (this.owner.level * 0.22);
+        this.damage = LASER.DAMAGE * this.owner.damageMultiplier * levelBoost * mult;
 
-        // --- 修复关键点：正确遍历数组并调用对象的 update ---
-        for (let i = this.sparks.length - 1; i >= 0; i--) {
-            const s = this.sparks[i]; // 获取单个火花对象
-            s.update(dt);             // 调用对象的 update
-            if (s.life <= 0) {
-                this.sparks.splice(i, 1);
+        // sparks at muzzle, rate-limited
+        if (this.phase !== 'charge') {
+            this.sparkTimer += dt;
+            if (this.sparkTimer > 0.015) {
+                this.sparkTimer = 0;
+                const count = this.phase === 'fire' ? 2 : 1;
+                for (let i = 0; i < count; i++) {
+                    this.sparks.push(new Spark(this.startPoint.x, this.startPoint.y, this.rotation));
+                }
             }
+        }
+
+        for (let i = this.sparks.length - 1; i >= 0; i--) {
+            const s = this.sparks[i];
+            s.update(dt);
+            if (s.life <= 0) this.sparks.splice(i, 1);
         }
     }
 
     static draw(ctx: CanvasRenderingContext2D, laser: Laser) {
         const { x, y } = laser.startPoint;
-        const rot = laser.rotation;
-        const len = laser.length;
         const w = laser.currentWidth;
-
         if (w <= 0.5) return;
 
         ctx.save();
         ctx.translate(x, y);
-        ctx.rotate(rot);
-
-        const jitterX = (Math.random() - 0.5) * laser.shakeIntensity;
-        ctx.translate(jitterX, 0);
-
+        ctx.rotate(laser.rotation);
         ctx.globalCompositeOperation = 'lighter';
 
         if (laser.phase === 'charge') {
-            Laser.drawChargeEffect(ctx, laser);
+            Laser.drawCharge(ctx, laser);
         } else {
-            // 1. 色散外晕
-            ctx.globalAlpha = 0.3;
-            ctx.fillStyle = 'rgba(255, 0, 100, 0.4)';
-            ctx.fillRect(-w * 1.5 - 2, 0, w * 3, -len);
-            ctx.fillStyle = 'rgba(0, 100, 255, 0.4)';
-            ctx.fillRect(-w * 1.5 + 2, 0, w * 3, -len);
-            ctx.globalAlpha = 1.0;
+            const len = laser.length;
 
-            // 2. 主能量束
-            const beamGrad = ctx.createLinearGradient(-w, 0, w, 0);
-            beamGrad.addColorStop(0, 'transparent');
-            beamGrad.addColorStop(0.2, LASER_THEME.COLORS.OUTER);
-            beamGrad.addColorStop(0.5, LASER_THEME.COLORS.INNER);
-            beamGrad.addColorStop(0.8, LASER_THEME.COLORS.OUTER);
-            beamGrad.addColorStop(1, 'transparent');
-            ctx.fillStyle = beamGrad;
-            ctx.fillRect(-w * 1.5, 0, w * 3, -len);
+            // 1) Outer glow (wide, soft)
+            ctx.fillStyle = LASER.COLOR_OUTER;
+            ctx.fillRect(-w * 1.6, -len, w * 3.2, len);
 
-            // 3. 核心动态流
-            const flowOffset = (performance.now() * 0.5) % 100;
-            ctx.strokeStyle = LASER_THEME.COLORS.CORE;
-            ctx.setLineDash([20, 30]);
-            ctx.lineDashOffset = flowOffset;
-            ctx.lineWidth = w * 0.4;
-            ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(0, -len); ctx.stroke();
-            ctx.setLineDash([]);
+            // 2) Mid beam
+            ctx.fillStyle = LASER.COLOR_MID;
+            ctx.globalAlpha = 0.7;
+            ctx.fillRect(-w * 0.7, -len, w * 1.4, len);
+            ctx.globalAlpha = 1;
 
-            // 4. 电弧
-            if (laser.phase === 'fire') {
-                ctx.strokeStyle = LASER_THEME.COLORS.ELECTRIC;
-                ctx.lineWidth = 2;
-                for (let j = 0; j < 2; j++) {
-                    ctx.beginPath();
-                    ctx.moveTo(0, 0);
-                    for (let i = 1; i < 6; i++) {
-                        ctx.lineTo((Math.random()-0.5) * w * 3, -len * (i/6));
-                    }
-                    ctx.stroke();
-                }
+            // 3) Inner bright
+            ctx.fillStyle = LASER.COLOR_INNER;
+            ctx.fillRect(-w * 0.38, -len, w * 0.76, len);
+
+            // 4) Pure white core
+            ctx.fillStyle = LASER.COLOR_CORE;
+            ctx.fillRect(-w * 0.14, -len, w * 0.28, len);
+
+            // 5) Muzzle flash ball at firing point
+            const flash = 1 + Math.sin(performance.now() * 0.04) * 0.2;
+            const mg = ctx.createRadialGradient(0, 0, 0, 0, 0, w * 2.2 * flash);
+            mg.addColorStop(0, 'rgba(255, 255, 255, 1)');
+            mg.addColorStop(0.3, 'rgba(160, 240, 255, 0.85)');
+            mg.addColorStop(1, 'rgba(20, 80, 255, 0)');
+            ctx.fillStyle = mg;
+            ctx.beginPath();
+            ctx.arc(0, 0, w * 2.2 * flash, 0, Math.PI * 2);
+            ctx.fill();
+
+            // 6) Tip bloom (far end)
+            const tg = ctx.createRadialGradient(0, -len, 0, 0, -len, w * 1.4);
+            tg.addColorStop(0, 'rgba(255, 255, 255, 0.9)');
+            tg.addColorStop(1, 'rgba(20, 80, 255, 0)');
+            ctx.fillStyle = tg;
+            ctx.beginPath();
+            ctx.arc(0, -len, w * 1.4, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        ctx.restore();
+
+        // 7) sparks (world space)
+        if (laser.sparks.length) {
+            ctx.save();
+            ctx.globalCompositeOperation = 'lighter';
+            for (const s of laser.sparks) {
+                const a = s.life / s.maxLife;
+                ctx.fillStyle = `rgba(255, 235, 140, ${a})`;
+                ctx.fillRect(s.x - s.size * 0.5, s.y - s.size * 0.5, s.size, s.size);
             }
-
-            // 5. 极亮中心线
-            ctx.strokeStyle = '#fff';
-            ctx.lineWidth = w * 0.15;
-            ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(0, -len); ctx.stroke();
+            ctx.restore();
         }
-
-        // 6. 绘制火花 (重置 Transform 以防旋转冲突)
-        ctx.restore();
-        
-        ctx.save();
-        ctx.globalCompositeOperation = 'lighter';
-        ctx.fillStyle = LASER_THEME.COLORS.SPARK;
-        for (const s of laser.sparks) {
-            const alpha = s.life / s.maxLife;
-            ctx.globalAlpha = alpha;
-            ctx.fillRect(s.x, s.y, s.size, s.size);
-        }
-        ctx.restore();
     }
 
-    private static drawChargeEffect(ctx: CanvasRenderingContext2D, laser: Laser) {
-        const progress = laser.timer / LASER_THEME.PHASES.CHARGE;
-        const r = 50 * (1 - progress);
-        ctx.strokeStyle = LASER_THEME.COLORS.INNER;
+    private static drawCharge(ctx: CanvasRenderingContext2D, laser: Laser) {
+        const p = laser.timer / LASER.PHASE_CHARGE;
+        const r = 32 * (1 - p) + 8;
+
+        // convergence ring
+        ctx.strokeStyle = `rgba(120, 230, 255, ${0.3 + p * 0.7})`;
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.arc(0, 0, Math.max(1, r), 0, Math.PI * 2);
+        ctx.arc(0, 0, r, 0, Math.PI * 2);
         ctx.stroke();
+
+        // core dot
+        const coreR = 2 + p * 6;
+        const cg = ctx.createRadialGradient(0, 0, 0, 0, 0, coreR * 2);
+        cg.addColorStop(0, 'rgba(255, 255, 255, 1)');
+        cg.addColorStop(1, 'rgba(100, 200, 255, 0)');
+        ctx.fillStyle = cg;
+        ctx.beginPath();
+        ctx.arc(0, 0, coreR * 2, 0, Math.PI * 2);
+        ctx.fill();
     }
 }
