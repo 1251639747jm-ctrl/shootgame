@@ -9,202 +9,176 @@ import { EnemyModel } from "./EnemyModel";
 import { ShieldModel } from "./ShieldModel";
 import { EntityType, GameConfig, WeaponType, ItemType } from "../types";
 
+/**
+ * 渲染器 - 性能优化版
+ * 关键优化：
+ * 1. 避免每帧使用 shadowBlur (canvas 性能杀手)，只在少量重点元素上使用
+ * 2. 大量背景元素 (stars / grid) 预渲染到离屏 canvas，减少每帧的 path/fill 调用
+ * 3. 减少 save/restore 次数
+ * 4. 批量绘制同类元素
+ */
 export class Renderer {
     ctx: CanvasRenderingContext2D;
     config: GameConfig;
-    shakeOffset: {x: number, y: number} = {x:0, y:0};
+    shakeOffset: { x: number; y: number } = { x: 0, y: 0 };
+
+    // 背景缓存
+    private bgCanvas: HTMLCanvasElement;
+    private bgCtx: CanvasRenderingContext2D;
+    private bgCacheWidth: number = 0;
+    private bgCacheHeight: number = 0;
 
     constructor(ctx: CanvasRenderingContext2D, config: GameConfig) {
         this.ctx = ctx;
         this.config = config;
+
+        this.bgCanvas = document.createElement('canvas');
+        this.bgCtx = this.bgCanvas.getContext('2d')!;
     }
 
     setShake(x: number, y: number) {
-        this.shakeOffset = {x, y};
+        this.shakeOffset = { x, y };
     }
 
     /**
-     * ==========================================
-     * 1. 终极背景渲染 (深空呼吸渐变 + 赛博穿梭网格)
-     * ==========================================
+     * 预渲染背景渐变和网格到 offscreen canvas。
+     * 只在尺寸变化时重新生成，普通帧只需要 drawImage。
      */
-    clear() {
-        this.ctx.setTransform(1, 0, 0, 1, 0, 0); 
-        const time = performance.now() / 1000;
+    private rebuildBgCache() {
+        const w = this.config.width;
+        const h = this.config.height;
+        this.bgCanvas.width = w;
+        this.bgCanvas.height = h;
+        const bctx = this.bgCtx;
 
-        // 1. 深邃宇宙背景 (带微弱的呼吸感)
-        const pulse = Math.sin(time * 0.5) * 0.05;
-        const grad = this.ctx.createLinearGradient(0, 0, 0, this.config.height);
+        // 深邃宇宙渐变
+        const grad = bctx.createLinearGradient(0, 0, 0, h);
         grad.addColorStop(0, '#020111');
-        grad.addColorStop(0.5, `rgba(${10 + pulse*50}, 5, 30, 1)`); // 中间紫色带呼吸
+        grad.addColorStop(0.5, '#0a051e');
         grad.addColorStop(1, '#050914');
-        this.ctx.fillStyle = grad;
-        this.ctx.fillRect(0, 0, this.config.width, this.config.height);
-        
-        // 2. 动态环境层 (可选：全息空间网格，增强速度感)
+        bctx.fillStyle = grad;
+        bctx.fillRect(0, 0, w, h);
+
+        // 静态网格 (不再动画，避免每帧重绘)
         if (this.config.settings.effectQuality !== 'LOW') {
-            this.ctx.save();
+            bctx.save();
             const gridSize = 120;
-            // 网格向下高速流动
-            const offsetY = (time * 150) % gridSize; 
-            
-            this.ctx.lineWidth = 1;
-            this.ctx.globalCompositeOperation = 'screen';
-            
-            // 绘制横向扫描线 (带有向下消失的透视感)
-            for(let y = offsetY; y < this.config.height; y += gridSize) {
-                const alpha = Math.max(0, (y / this.config.height) * 0.15); // 越往下越亮
-                this.ctx.strokeStyle = `rgba(0, 200, 255, ${alpha})`;
-                this.ctx.beginPath();
-                this.ctx.moveTo(0, y);
-                this.ctx.lineTo(this.config.width, y);
-                this.ctx.stroke();
+            bctx.lineWidth = 1;
+            bctx.globalCompositeOperation = 'screen';
+
+            for (let y = 0; y < h; y += gridSize) {
+                const alpha = Math.max(0, (y / h) * 0.12);
+                bctx.strokeStyle = `rgba(0, 200, 255, ${alpha})`;
+                bctx.beginPath();
+                bctx.moveTo(0, y);
+                bctx.lineTo(w, y);
+                bctx.stroke();
             }
-            // 绘制垂直能量线
-            for(let x = 0; x < this.config.width; x += gridSize) {
-                const distToCenter = Math.abs(x - this.config.width/2) / (this.config.width/2);
-                const alpha = (1 - distToCenter) * 0.08; // 中间亮两边暗
-                this.ctx.strokeStyle = `rgba(0, 200, 255, ${alpha})`;
-                this.ctx.beginPath();
-                this.ctx.moveTo(x, 0);
-                this.ctx.lineTo(x, this.config.height);
-                this.ctx.stroke();
+            for (let x = 0; x < w; x += gridSize) {
+                const distToCenter = Math.abs(x - w / 2) / (w / 2);
+                const alpha = (1 - distToCenter) * 0.06;
+                bctx.strokeStyle = `rgba(0, 200, 255, ${alpha})`;
+                bctx.beginPath();
+                bctx.moveTo(x, 0);
+                bctx.lineTo(x, h);
+                bctx.stroke();
             }
-            this.ctx.restore();
+            bctx.restore();
         }
+
+        this.bgCacheWidth = w;
+        this.bgCacheHeight = h;
+    }
+
+    clear() {
+        this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+        if (
+            this.bgCacheWidth !== this.config.width ||
+            this.bgCacheHeight !== this.config.height
+        ) {
+            this.rebuildBgCache();
+        }
+        // 一次 drawImage 替代原来的多次 beginPath/stroke
+        this.ctx.drawImage(this.bgCanvas, 0, 0);
 
         // 应用屏幕震动
         this.ctx.translate(this.shakeOffset.x, this.shakeOffset.y);
     }
 
     /**
-     * ==========================================
-     * 2. 多重星云 (旋转气旋 + 复合光晕)
-     * ==========================================
+     * 星云 - 保持轻量
      */
     drawNebula(nebula: Nebula) {
         const ctx = this.ctx;
-        const time = performance.now() / 3000;
-        
+        const time = performance.now() / 5000;
+
         ctx.save();
         ctx.translate(nebula.position.x, nebula.position.y);
-        ctx.rotate(time + nebula.position.x); // 每个星云有不同的自转初始相位
-        
+        ctx.rotate(time + nebula.position.x * 0.001);
         ctx.globalCompositeOperation = 'screen';
-        
-        // 核心辉光层
+
         const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, nebula.scale);
         grad.addColorStop(0, nebula.color);
         grad.addColorStop(1, 'rgba(0,0,0,0)');
-        ctx.globalAlpha = 0.5;
+        ctx.globalAlpha = 0.4;
         ctx.fillStyle = grad;
         ctx.beginPath();
         ctx.arc(0, 0, nebula.scale, 0, Math.PI * 2);
         ctx.fill();
 
-        // 旋涡云团层 (用交错的椭圆模拟)
-        ctx.globalAlpha = 0.2;
-        ctx.fillStyle = nebula.color;
-        for (let i = 0; i < 3; i++) {
-            ctx.rotate(Math.PI / 1.5);
-            ctx.beginPath();
-            ctx.ellipse(nebula.scale * 0.2, 0, nebula.scale * 0.8, nebula.scale * 0.4, 0, 0, Math.PI * 2);
-            ctx.fill();
-        }
-        
         ctx.restore();
     }
 
     /**
-     * ==========================================
-     * 3. 钻石星辰 (高频闪烁 + 十字星芒)
-     * ==========================================
+     * 星星 - 大幅简化：小星星只画一个矩形，大星星只画一个圆形
+     * 不再使用 shadowBlur 和多重椭圆，200 颗星就能轻松渲染
      */
     drawStar(star: Star) {
         const ctx = this.ctx;
-        const time = performance.now() / 1000;
-        
-        // 基于坐标和时间生成随机闪烁感
-        const twinkle = 0.5 + Math.sin(time * 6 + star.position.x * 10) * 0.5;
-        const alpha = star.brightness * (0.4 + twinkle * 0.6); // 保持一定基础亮度
-        
-        ctx.save();
-        ctx.translate(star.position.x, star.position.y);
-        ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
-        ctx.globalCompositeOperation = 'lighter';
 
-        // 基础星星实体
-        ctx.beginPath();
-        ctx.arc(0, 0, star.radius, 0, Math.PI * 2);
-        ctx.fill();
+        // 闪烁（基于位置和时间）避免每颗星都调用 performance.now 后计算太多次
+        const t = performance.now() * 0.004 + star.position.x * 0.01;
+        const twinkle = 0.6 + Math.sin(t) * 0.4;
+        const alpha = star.brightness * twinkle;
 
-        // 大星星添加极致的光晕和十字星芒 (Lens Flare)
-        if (star.radius > 1.2 && this.config.settings.effectQuality !== 'LOW') {
-            ctx.fillStyle = `rgba(150, 220, 255, ${alpha * 0.6})`;
+        if (star.radius < 1.0) {
+            // 小星星：fillRect 比 arc + beginPath + fill 快得多
+            ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+            ctx.fillRect(star.position.x, star.position.y, 1, 1);
+        } else {
+            ctx.fillStyle = `rgba(200, 230, 255, ${alpha})`;
             ctx.beginPath();
-            // 横向星芒
-            ctx.ellipse(0, 0, star.radius * 6, star.radius * 0.3, 0, 0, Math.PI*2);
-            // 纵向星芒
-            ctx.ellipse(0, 0, star.radius * 0.3, star.radius * 6, 0, 0, Math.PI*2);
-            ctx.fill();
-            
-            // 核心高光晕染
-            ctx.shadowBlur = 10;
-            ctx.shadowColor = '#00ffff';
-            ctx.beginPath();
-            ctx.arc(0, 0, star.radius, 0, Math.PI*2);
+            ctx.arc(star.position.x, star.position.y, star.radius, 0, Math.PI * 2);
             ctx.fill();
         }
-        ctx.restore();
     }
 
     /**
-     * ==========================================
-     * 4. 燃烧的岩浆陨石 (摩擦发热 + 表面裂纹)
-     * ==========================================
+     * 流星 - 去掉 shadowBlur，保留核心视觉
      */
     drawMeteor(meteor: Meteor) {
         const ctx = this.ctx;
         ctx.save();
         ctx.translate(meteor.position.x, meteor.position.y);
         ctx.rotate(meteor.rotation);
-        
-        // 大气摩擦的超热边缘发光
-        ctx.shadowColor = '#ea580c'; // 橙红火光
-        ctx.shadowBlur = 15;
-        
-        // 岩浆渐变底色
-        const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, meteor.radius);
-        grad.addColorStop(0, '#1f2937'); // 核心冷岩石
-        grad.addColorStop(0.7, '#374151');
-        grad.addColorStop(1, '#991b1b'); // 边缘烧红
-        
-        ctx.fillStyle = grad; 
-        ctx.strokeStyle = '#f97316'; // 亮橙色描边
+
+        ctx.fillStyle = '#9a3412';
+        ctx.strokeStyle = '#f97316';
         ctx.lineWidth = 1.5;
-        
+
+        const r = meteor.radius;
         ctx.beginPath();
         const spikes = 7;
-        const r = meteor.radius;
-        for(let i=0; i < spikes * 2; i++) {
-            const angle = (i/(spikes*2)) * Math.PI * 2;
-            const len = (i % 2 === 0) ? r : r * 0.6;
-            ctx.lineTo(Math.cos(angle)*len, Math.sin(angle)*len);
+        for (let i = 0; i < spikes * 2; i++) {
+            const angle = (i / (spikes * 2)) * Math.PI * 2;
+            const len = i % 2 === 0 ? r : r * 0.6;
+            ctx.lineTo(Math.cos(angle) * len, Math.sin(angle) * len);
         }
         ctx.closePath();
         ctx.fill();
         ctx.stroke();
-        
-        // 表面熔岩裂纹点缀
-        ctx.shadowBlur = 0; // 关掉阴影提高性能
-        ctx.strokeStyle = '#facc15'; // 黄色裂纹
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(-r*0.4, -r*0.2);
-        ctx.lineTo(r*0.1, r*0.3);
-        ctx.lineTo(r*0.4, 0);
-        ctx.stroke();
-        
+
         ctx.restore();
     }
 
@@ -214,28 +188,28 @@ export class Renderer {
 
     drawEnemy(enemy: Enemy) {
         EnemyModel.draw(this.ctx, enemy);
-        
-        // 优化 Boss 血条样式
+
         if (enemy.isBoss) {
-            this.ctx.save();
-            this.ctx.translate(enemy.position.x, enemy.position.y);
-            // 边框底托
-            this.ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
-            this.ctx.strokeStyle = '#ef4444';
-            this.ctx.lineWidth = 2;
-            this.ctx.fillRect(-60, -120, 120, 12);
-            this.ctx.strokeRect(-60, -120, 120, 12);
-            
-            // 动态发光血条
-            this.ctx.fillStyle = '#dc2626';
-            this.ctx.shadowBlur = 10;
-            this.ctx.shadowColor = '#ef4444';
+            const ctx = this.ctx;
+            ctx.save();
+            ctx.translate(enemy.position.x, enemy.position.y);
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+            ctx.strokeStyle = '#ef4444';
+            ctx.lineWidth = 2;
+            ctx.fillRect(-60, -120, 120, 12);
+            ctx.strokeRect(-60, -120, 120, 12);
+
+            ctx.fillStyle = '#dc2626';
             const healthRatio = Math.max(0, enemy.health / enemy.maxHealth);
-            this.ctx.fillRect(-59, -119, 118 * healthRatio, 10);
-            this.ctx.restore();
+            ctx.fillRect(-59, -119, 118 * healthRatio, 10);
+            ctx.restore();
         }
     }
 
+    /**
+     * 子弹 - 去掉 shadowBlur (每帧可能几十颗子弹，blur 代价巨大)
+     * 改用叠加一层更大更淡的形状模拟 glow
+     */
     drawBullet(bullet: Bullet) {
         const ctx = this.ctx;
         ctx.save();
@@ -244,187 +218,167 @@ export class Renderer {
         ctx.globalCompositeOperation = 'lighter';
 
         if (bullet.type === EntityType.BULLET_PLAYER) {
-            ctx.shadowBlur = 12;
-            ctx.shadowColor = '#facc15';
-            ctx.fillStyle = '#fff';
-            // 尾部拉长，增加射击速度感
-            ctx.fillRect(-3, -20, 2, 35);
-            ctx.fillRect(1, -20, 2, 35);
+            // 外发光（替代 shadowBlur）
+            ctx.fillStyle = 'rgba(250, 204, 21, 0.35)';
+            ctx.fillRect(-5, -22, 10, 40);
+            // 核心
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(-2, -20, 4, 35);
         } else {
-            ctx.shadowBlur = 15;
-            ctx.shadowColor = '#ff0055';
-            ctx.fillStyle = '#fff';
+            // 外发光
+            ctx.fillStyle = 'rgba(255, 0, 85, 0.35)';
+            ctx.beginPath();
+            ctx.arc(0, 0, 10, 0, Math.PI * 2);
+            ctx.fill();
+            // 核心
+            ctx.fillStyle = '#ffffff';
             ctx.beginPath();
             ctx.arc(0, 0, 4, 0, Math.PI * 2);
             ctx.fill();
-            // 敌方光弹的外发光环
-            ctx.strokeStyle = 'rgba(255, 0, 85, 0.8)';
-            ctx.lineWidth = 3;
-            ctx.beginPath();
-            ctx.arc(0, 0, 9, 0, Math.PI * 2);
-            ctx.stroke();
         }
         ctx.restore();
     }
 
+    /**
+     * 充能粒子 - 去掉 shadowBlur
+     */
     drawChargeParticle(p: ChargeParticle) {
-        // ... 原有逻辑很不错，保持不变
-        this.ctx.save();
-        this.ctx.translate(p.position.x, p.position.y);
-        this.ctx.globalCompositeOperation = 'lighter';
-        this.ctx.shadowBlur = 15;
-        this.ctx.shadowColor = '#00ffff';
-        const grad = this.ctx.createRadialGradient(0, 0, 0, 0, 0, p.radius);
-        grad.addColorStop(0, '#ffffff'); 
-        grad.addColorStop(0.4, '#a5f3fc'); 
-        grad.addColorStop(1, '#0891b2'); 
-        this.ctx.fillStyle = grad;
-        this.ctx.beginPath();
-        this.ctx.arc(0, 0, p.radius, 0, Math.PI * 2);
-        this.ctx.fill();
-        this.ctx.restore();
+        const ctx = this.ctx;
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        // 外层淡光
+        ctx.fillStyle = 'rgba(8, 145, 178, 0.5)';
+        ctx.beginPath();
+        ctx.arc(p.position.x, p.position.y, p.radius * 1.8, 0, Math.PI * 2);
+        ctx.fill();
+        // 核心
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(p.position.x, p.position.y, p.radius * 0.6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
     }
 
-    drawSkillShield(shield: Shield) { ShieldModel.draw(this.ctx, shield); }
+    drawSkillShield(shield: Shield) {
+        ShieldModel.draw(this.ctx, shield);
+    }
 
     drawSkillShockwave(sw: Shockwave) {
         const ctx = this.ctx;
         ctx.save();
         ctx.translate(sw.position.x, sw.position.y);
         ctx.globalCompositeOperation = 'lighter';
-        
-        // 震荡波增加中心填充衰减，不仅仅是一个圈
-        const grad = ctx.createRadialGradient(0, 0, sw.radius * 0.8, 0, 0, sw.radius);
-        grad.addColorStop(0, 'rgba(251, 191, 36, 0)');
-        grad.addColorStop(0.8, `rgba(251, 191, 36, ${sw.opacity * 0.5})`);
-        grad.addColorStop(1, 'rgba(251, 191, 36, 0)');
-        ctx.fillStyle = grad;
-        ctx.beginPath(); ctx.arc(0, 0, sw.radius, 0, Math.PI*2); ctx.fill();
 
         ctx.strokeStyle = `rgba(255, 230, 100, ${sw.opacity})`;
         ctx.lineWidth = 8;
-        ctx.shadowColor = '#fbbf24';
-        ctx.shadowBlur = 25;
         ctx.beginPath();
-        ctx.arc(0, 0, sw.radius, 0, Math.PI*2);
+        ctx.arc(0, 0, sw.radius, 0, Math.PI * 2);
         ctx.stroke();
+
+        // 内圈次高光
+        ctx.strokeStyle = `rgba(255, 255, 255, ${sw.opacity * 0.5})`;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(0, 0, sw.radius * 0.95, 0, Math.PI * 2);
+        ctx.stroke();
+
         ctx.restore();
     }
 
-    /**
-     * ==========================================
-     * 5. 暴击跳字 (街机风格弹簧缩放 + 霓虹描边)
-     * ==========================================
-     */
     drawFloatingText(ft: FloatingText) {
         const ctx = this.ctx;
         ctx.save();
         ctx.translate(ft.position.x, ft.position.y);
-        
-        // 出现时的夸张弹起效果，消失时的平滑缩放
+
         const popScale = ft.life > 0.8 ? 1.5 - (1 - ft.life) * 2.5 : 1.0;
         const fadeScale = Math.max(0, ft.life);
         const scale = popScale * fadeScale;
-        
+
         ctx.scale(scale, scale);
-        ctx.globalAlpha = Math.min(1, ft.life * 2.5); // 快速淡入，缓慢淡出
-        
-        ctx.font = '900 26px "Arial Black", Impact, sans-serif'; 
+        ctx.globalAlpha = Math.min(1, ft.life * 2.5);
+
+        ctx.font = '900 22px "Arial Black", Impact, sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        
-        // 外层黑色粗描边垫底
-        ctx.lineWidth = 4;
+
+        // 黑色描边
+        ctx.lineWidth = 3;
         ctx.strokeStyle = '#000000';
         ctx.strokeText(ft.text, 0, 0);
 
-        // 颜色光晕
-        ctx.shadowColor = ft.color;
-        ctx.shadowBlur = 15;
+        // 主色填充
         ctx.fillStyle = ft.color;
         ctx.fillText(ft.text, 0, 0);
 
-        // 核心白光叠加
-        ctx.globalCompositeOperation = 'lighter';
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
-        ctx.fillText(ft.text, 0, 0);
-        
         ctx.restore();
     }
 
     /**
-     * ==========================================
-     * 6. 高能等离子粒子 (极速物理拉伸变形)
-     * ==========================================
+     * 粒子 - 性能敏感，去掉 shadowBlur/ellipse rotation
+     * 低画质下直接跳过一半粒子
      */
     drawParticle(p: Particle) {
-        if (this.config.settings.effectQuality === 'LOW' && Math.random() > 0.5) return; 
+        if (this.config.settings.effectQuality === 'LOW' && Math.random() > 0.5) return;
 
         const ctx = this.ctx;
-        ctx.save();
         ctx.globalCompositeOperation = 'lighter';
         ctx.globalAlpha = p.life;
-        
-        ctx.translate(p.position.x, p.position.y);
-        const speed = Math.sqrt(p.velocity.x**2 + p.velocity.y**2);
-        const angle = Math.atan2(p.velocity.y, p.velocity.x);
-        ctx.rotate(angle);
-        
-        // 核心白光：让粒子看起来像高能光子
-        ctx.fillStyle = '#ffffff';
-        ctx.beginPath();
-        ctx.ellipse(0, 0, p.size * 0.5, p.size * 0.5, 0, 0, Math.PI*2);
-        ctx.fill();
-
-        // 外围颜色：根据移动速度产生极致的残影拉伸
         ctx.fillStyle = p.color;
-        ctx.shadowColor = p.color;
-        ctx.shadowBlur = 10;
-        ctx.beginPath();
-        const stretchX = 1 + speed / 80; // 速度越快拉得越长
-        const stretchY = 0.8; // 微微压扁
-        ctx.ellipse(0, 0, p.size * stretchX, p.size * stretchY, 0, 0, Math.PI*2);
-        ctx.fill();
-        
-        ctx.restore();
+
+        const size = p.size;
+        // 用 fillRect 比 arc 快得多，对粒子来说像素差几乎看不出
+        ctx.fillRect(p.position.x - size, p.position.y - size, size * 2, size * 2);
+
+        ctx.globalAlpha = 1;
+        ctx.globalCompositeOperation = 'source-over';
     }
 
     drawItem(item: Item) {
         const ctx = this.ctx;
         ctx.save();
         ctx.translate(item.position.x, item.position.y);
-        
+
         let color = '#fff';
         let label = '?';
-        if (item.itemType === ItemType.HEALTH) { color = '#22c55e'; label = '+HP'; }
-        if (item.itemType === ItemType.MANA) { color = '#3b82f6'; label = '+MP'; }
-        if (item.itemType === ItemType.WEAPON_UP) { color = '#facc15'; label = 'UP!'; }
-        
-        // 物品外发光呼吸灯
-        const time = performance.now() / 200;
-        ctx.shadowBlur = 15 + Math.sin(time) * 10;
-        ctx.shadowColor = color;
-        
+        if (item.itemType === ItemType.HEALTH) {
+            color = '#22c55e';
+            label = '+HP';
+        } else if (item.itemType === ItemType.MANA) {
+            color = '#3b82f6';
+            label = '+MP';
+        } else if (item.itemType === ItemType.WEAPON_UP) {
+            color = '#facc15';
+            label = 'UP!';
+        }
+
         ctx.rotate(item.wobble);
-        
-        // 半透明深色底托
-        ctx.fillStyle = 'rgba(10, 15, 30, 0.8)';
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 2.5;
-        
-        ctx.beginPath();
-        ctx.roundRect(-16, -16, 32, 32, 6); // 圆角矩形更高级
-        ctx.fill();
-        ctx.stroke();
-        
-        // 文字高光
+
+        // 外发光层（代替 shadowBlur）
         ctx.globalCompositeOperation = 'lighter';
         ctx.fillStyle = color;
-        ctx.font = 'bold 16px "Arial Black", sans-serif';
+        ctx.globalAlpha = 0.25;
+        ctx.beginPath();
+        ctx.arc(0, 0, 22, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.globalCompositeOperation = 'source-over';
+
+        // 主体
+        ctx.fillStyle = 'rgba(10, 15, 30, 0.9)';
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.roundRect(-16, -16, 32, 32, 6);
+        ctx.fill();
+        ctx.stroke();
+
+        // 文字
+        ctx.fillStyle = color;
+        ctx.font = 'bold 14px "Arial Black", sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(label, 0, 1);
-        
+
         ctx.restore();
     }
 }
