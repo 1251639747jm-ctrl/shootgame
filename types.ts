@@ -92,4 +92,9 @@ export interface GameRef {
   triggerSkill: (skillIndex: number) => void;
   getPlayerState: () => PlayerState | null;
   updateSettings: (settings: GameSettings) => void;
+  // For touch HUD: notify engine when a touch belongs to a UI button, so the global
+  // touch handler in InputManager ignores it for movement/firing.
+  markUITouch: (id: number) => void;
+  unmarkUITouch: (id: number) => void;
+  getJoystickState: () => { active: boolean; base: Vector2; knob: Vector2 };
 }

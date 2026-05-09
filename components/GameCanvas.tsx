@@ -38,6 +38,17 @@ export const GameCanvas = forwardRef<GameRef, GameCanvasProps>(({
         if (engineRef.current) {
             engineRef.current.updateSettings(settings);
         }
+    },
+    markUITouch: (id: number) => {
+        engineRef.current?.input.markUITouch(id);
+    },
+    unmarkUITouch: (id: number) => {
+        engineRef.current?.input.unmarkUITouch(id);
+    },
+    getJoystickState: () => {
+        return engineRef.current
+            ? engineRef.current.input.getJoystickState()
+            : { active: false, base: { x: 0, y: 0 }, knob: { x: 0, y: 0 } };
     }
   }));
 

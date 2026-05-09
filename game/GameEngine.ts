@@ -261,7 +261,7 @@ export class GameEngine {
       if (this.input.isKeyPressed('3')) this.triggerSkill(3);
 
       const now = performance.now();
-      const isFiring = (this.input.isMouseDown || this.input.keys[' ']);
+      const isFiring = this.input.isFiring;
       
       const existingBeam = this.entities.find(e => e instanceof Laser && e.owner === this.player);
 
@@ -270,19 +270,23 @@ export class GameEngine {
           if (isFiring) {
               this.player.isCharging = true;
               this.player.chargeLevel = Math.min(100, this.player.chargeLevel + this.player.chargeRate * dt);
-              // Spawn multiple particles per frame for density
-              for(let i=0; i<3; i++) {
-                 this.entities.push(new ChargeParticle(this.player));
+
+              // 充能粒子 (密度随 chargeLevel 提升)
+              const pulseCount = 2 + Math.floor(this.player.chargeLevel / 25);
+              for (let i = 0; i < pulseCount; i++) {
+                  this.entities.push(new ChargeParticle(this.player));
+              }
+
+              // 充满即发射，不需要放手
+              if (this.player.chargeLevel >= 100 && !existingBeam) {
+                  this.entities.push(new Laser(this.player));
+                  this.addShake(8, 0.3);
+                  this.player.chargeLevel = 0;
+                  this.player.isCharging = false;
               }
           } else {
-              if (this.player.isCharging && this.player.chargeLevel >= 100 && !existingBeam) {
-                  // Spawn new Laser module
-                  this.entities.push(new Laser(this.player));
-                  this.addShake(5, 2.0); 
-                  this.player.chargeLevel = 0;
-              }
               this.player.isCharging = false;
-              this.player.chargeLevel = Math.max(0, this.player.chargeLevel - this.player.chargeRate * dt * 2); 
+              this.player.chargeLevel = Math.max(0, this.player.chargeLevel - this.player.chargeRate * dt * 2);
           }
       } 
       else if (this.player.currentWeapon === WeaponType.TESLA) {
@@ -644,7 +648,7 @@ export class GameEngine {
             if (relX < (laser.width || laser.radius) + target.radius && relY > 0 && relY < laser.length) {
                 collision = true;
                 if (target instanceof Enemy) {
-                    const dmg = (laser as any).damage || 10;
+                    const dmg = laser.damage || 10;
                     target.health -= dmg;
                     this.createExplosion(target.position.x + (Math.random()-0.5)*20, target.position.y, '#0ff', 1);
                     this.spawnFloatingText(Math.ceil(dmg).toString(), '#0ff', {x: target.position.x + (Math.random()-0.5)*20, y: target.position.y});
@@ -759,6 +763,13 @@ export class GameEngine {
       else if (e instanceof Particle) this.renderer.drawParticle(e);
       else if (e instanceof ChargeParticle) this.renderer.drawChargeParticle(e);
     });
+
+    // 激光充能视觉 (在玩家头顶)
+    if (this.player && !this.player.markedForDeletion &&
+        this.player.currentWeapon === WeaponType.LASER &&
+        this.player.chargeLevel > 0) {
+        Laser.drawChargingOverlay(this.ctx, this.player);
+    }
     
     this.entities.forEach(e => {
         if (e instanceof Shield) this.renderer.drawSkillShield(e);
