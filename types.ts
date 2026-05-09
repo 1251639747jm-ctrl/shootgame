@@ -44,10 +44,12 @@ export enum EntityType {
 
 export enum WeaponType {
   VULCAN,
-  LASER, 
-  PLASMA, // Now uses Missile logic
+  LASER,
+  PLASMA,    // tracking missile
   TESLA,
-  BOMB
+  BOMB,
+  RAILGUN,   // 电磁轨道炮: 高伤穿透
+  SPREAD     // 散弹: 7发扇形
 }
 
 export enum ItemType {

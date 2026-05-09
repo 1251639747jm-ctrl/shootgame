@@ -329,6 +329,38 @@ export class GameEngine {
                }
            }
       }
+      else if (this.player.currentWeapon === WeaponType.RAILGUN) {
+          // 电磁轨道炮：慢节奏、高伤、穿透
+          if (isFiring && now - this.player.lastShotTime > 650) {
+              this.player.lastShotTime = now;
+              const wx = this.player.position.x;
+              const wy = this.player.position.y;
+              const rot = this.player.rotation;
+              this.entities.push(new Bullet(wx, wy, true, WeaponType.RAILGUN, 0, rot, this.player));
+              this.addShake(6, 0.12);
+              // 枪口火花
+              for (let i = 0; i < 8; i++) {
+                  this.entities.push(new Particle(wx, wy - 10, '#c4b5fd', 350, 0.25, 2));
+              }
+          }
+      }
+      else if (this.player.currentWeapon === WeaponType.SPREAD) {
+          // 散弹：7 发扇形，射速略慢
+          if (isFiring && now - this.player.lastShotTime > 280) {
+              this.player.lastShotTime = now;
+              const wx = this.player.position.x;
+              const wy = this.player.position.y;
+              const rot = this.player.rotation;
+              const pellets = 5 + Math.min(4, this.player.level); // 等级越高越多
+              const spread = 0.55; // 总弧度
+              for (let i = 0; i < pellets; i++) {
+                  const t = pellets === 1 ? 0 : (i / (pellets - 1) - 0.5);
+                  const off = t * spread;
+                  this.entities.push(new Bullet(wx, wy, true, WeaponType.SPREAD, off, rot, this.player));
+              }
+              this.addShake(3, 0.08);
+          }
+      }
       else {
           // Vulcan
           if (isFiring && now - this.player.lastShotTime > this.player.fireRate) {
@@ -692,10 +724,17 @@ export class GameEngine {
     if (isPlayerBullet && isEnemy) {
         const enemy = (a instanceof Enemy) ? a : b as Enemy;
         const bullet = (a.type === EntityType.BULLET_PLAYER) ? a as Bullet : b as Bullet;
-        
-        bullet.markedForDeletion = true;
+
+        // 穿透子弹 (RAILGUN): 每个敌人只能被同一发打中一次, 但子弹不消失
+        if (bullet.piercing) {
+            if (bullet.hitEnemies.has(enemy)) return;
+            bullet.hitEnemies.add(enemy);
+        } else {
+            bullet.markedForDeletion = true;
+        }
+
         enemy.health -= bullet.damage;
-        
+
         this.createExplosion(enemy.position.x, enemy.position.y, bullet.color, 2);
         this.spawnFloatingText(Math.ceil(bullet.damage).toString(), '#facc15', enemy.position);
         if (enemy.health <= 0) this.killEnemy(enemy);

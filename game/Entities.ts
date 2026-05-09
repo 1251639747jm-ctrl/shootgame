@@ -44,7 +44,9 @@ export class Player extends Entity {
     currentWeapon: WeaponType = WeaponType.VULCAN;
     weaponOrder: WeaponType[] = [
         WeaponType.VULCAN,
+        WeaponType.SPREAD,
         WeaponType.LASER,
+        WeaponType.RAILGUN,
         WeaponType.PLASMA,
         WeaponType.TESLA,
         WeaponType.BOMB
@@ -238,6 +240,10 @@ export class Bullet extends Entity {
     target: Entity | null = null;
     angleOffset: number = 0;
     owner: Player | null = null;
+    weaponType: WeaponType = WeaponType.VULCAN;
+    // 穿透射击：命中敌人不消失，但每个敌人只命中一次
+    piercing: boolean = false;
+    hitEnemies: Set<any> = new Set();
 
     constructor(
         x: number,
@@ -253,13 +259,34 @@ export class Bullet extends Entity {
         this.angleOffset = angleOffset;
         this.owner = owner;
         this.rotation = rotation + angleOffset;
+        this.weaponType = weaponType;
 
         if (isPlayerBullet) {
-            const speed = 900;
-            this.velocity.x = Math.sin(this.rotation) * speed;
-            this.velocity.y = -Math.cos(this.rotation) * speed;
-            this.color = '#facc15';
-            this.damage = 25 * (owner ? owner.damageMultiplier : 1);
+            const dmgMul = owner ? owner.damageMultiplier : 1;
+
+            if (weaponType === WeaponType.RAILGUN) {
+                const speed = 1800;
+                this.velocity.x = Math.sin(this.rotation) * speed;
+                this.velocity.y = -Math.cos(this.rotation) * speed;
+                this.color = '#a78bfa';
+                this.damage = 180 * dmgMul;
+                this.radius = 8;
+                this.piercing = true;
+            } else if (weaponType === WeaponType.SPREAD) {
+                const speed = 780 + Math.random() * 80;
+                this.velocity.x = Math.sin(this.rotation) * speed;
+                this.velocity.y = -Math.cos(this.rotation) * speed;
+                this.color = '#fb923c';
+                this.damage = 18 * dmgMul;
+                this.radius = 4;
+            } else {
+                // VULCAN / 其他
+                const speed = 900;
+                this.velocity.x = Math.sin(this.rotation) * speed;
+                this.velocity.y = -Math.cos(this.rotation) * speed;
+                this.color = '#facc15';
+                this.damage = 25 * dmgMul;
+            }
         } else {
             // enemy bullets get velocity set externally
             this.color = '#ff4466';

@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { GameCanvas } from './components/GameCanvas';
 import { GameState, WeaponType, GameRef, PlayerState, GameSettings } from './types';
-import { Rocket, Trophy, Heart, Crosshair, Zap, Disc, Hexagon, Shield, CircleDot, Activity, Bomb, Settings, X } from 'lucide-react';
+import { Rocket, Trophy, Heart, Crosshair, Zap, Disc, Hexagon, Shield, CircleDot, Activity, Bomb, Settings, X, Waves, Crosshair as Scope } from 'lucide-react';
 
 /**
  * 专门用于手机按钮的 Hook / HOC：
@@ -109,23 +109,27 @@ const App: React.FC = () => {
 
   const getWeaponIcon = () => {
     switch (currentWeapon) {
-      case WeaponType.LASER:  return <Zap size={24} className="text-cyan-400" />;
-      case WeaponType.PLASMA: return <Disc size={24} className="text-fuchsia-400" />;
-      case WeaponType.TESLA:  return <Activity size={24} className="text-blue-200" />;
-      case WeaponType.BOMB:   return <Bomb size={24} className="text-red-400" />;
+      case WeaponType.LASER:   return <Zap size={24} className="text-cyan-400" />;
+      case WeaponType.PLASMA:  return <Disc size={24} className="text-fuchsia-400" />;
+      case WeaponType.TESLA:   return <Activity size={24} className="text-blue-200" />;
+      case WeaponType.BOMB:    return <Bomb size={24} className="text-red-400" />;
+      case WeaponType.RAILGUN: return <Scope size={24} className="text-violet-300" />;
+      case WeaponType.SPREAD:  return <Waves size={24} className="text-orange-400" />;
       case WeaponType.VULCAN:
-      default:                return <Hexagon size={24} className="text-yellow-400" />;
+      default:                 return <Hexagon size={24} className="text-yellow-400" />;
     }
   };
 
   const getWeaponName = () => {
     switch (currentWeapon) {
-      case WeaponType.LASER:  return "HYPER BEAM";
-      case WeaponType.PLASMA: return "TRACKING MSL";
-      case WeaponType.TESLA:  return "TESLA COIL";
-      case WeaponType.BOMB:   return "DOOM BOMB";
-      case WeaponType.VULCAN: return "VULCAN CANNON";
-      default:                return "";
+      case WeaponType.LASER:   return "HYPER BEAM";
+      case WeaponType.PLASMA:  return "TRACKING MSL";
+      case WeaponType.TESLA:   return "TESLA COIL";
+      case WeaponType.BOMB:    return "DOOM BOMB";
+      case WeaponType.RAILGUN: return "RAILGUN";
+      case WeaponType.SPREAD:  return "SCATTER GUN";
+      case WeaponType.VULCAN:  return "VULCAN CANNON";
+      default:                 return "";
     }
   };
 

@@ -218,19 +218,44 @@ export class Renderer {
         ctx.globalCompositeOperation = 'lighter';
 
         if (bullet.type === EntityType.BULLET_PLAYER) {
-            // 外发光（替代 shadowBlur）
-            ctx.fillStyle = 'rgba(250, 204, 21, 0.35)';
-            ctx.fillRect(-5, -22, 10, 40);
-            // 核心
-            ctx.fillStyle = '#ffffff';
-            ctx.fillRect(-2, -20, 4, 35);
+            if (bullet.weaponType === WeaponType.RAILGUN) {
+                // 电磁轨道炮：长条紫光 + 白色核心 + 两侧电轨
+                ctx.fillStyle = 'rgba(167, 139, 250, 0.35)';
+                ctx.fillRect(-8, -38, 16, 70);
+                ctx.fillStyle = 'rgba(216, 180, 254, 0.9)';
+                ctx.fillRect(-3, -38, 6, 70);
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(-1, -38, 2, 70);
+                // 电轨光
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(-6, -32); ctx.lineTo(-6, 30);
+                ctx.moveTo(6, -32);  ctx.lineTo(6, 30);
+                ctx.stroke();
+            } else if (bullet.weaponType === WeaponType.SPREAD) {
+                // 散弹：橙色小光点
+                ctx.fillStyle = 'rgba(251, 146, 60, 0.45)';
+                ctx.beginPath();
+                ctx.arc(0, 0, 7, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = '#fff7ed';
+                ctx.beginPath();
+                ctx.arc(0, 0, 3, 0, Math.PI * 2);
+                ctx.fill();
+            } else {
+                // VULCAN 默认
+                ctx.fillStyle = 'rgba(250, 204, 21, 0.35)';
+                ctx.fillRect(-5, -22, 10, 40);
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(-2, -20, 4, 35);
+            }
         } else {
-            // 外发光
+            // 敌方子弹
             ctx.fillStyle = 'rgba(255, 0, 85, 0.35)';
             ctx.beginPath();
             ctx.arc(0, 0, 10, 0, Math.PI * 2);
             ctx.fill();
-            // 核心
             ctx.fillStyle = '#ffffff';
             ctx.beginPath();
             ctx.arc(0, 0, 4, 0, Math.PI * 2);
