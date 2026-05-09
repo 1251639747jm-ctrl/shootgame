@@ -98,6 +98,43 @@ export class GameEngine {
     this.renderer.config.height = height;
   }
 
+  startMenuAnimation() {
+    if (this.state === GameState.PLAYING) return;
+    this.state = GameState.MENU;
+    this.lastTime = performance.now();
+    requestAnimationFrame(this.menuLoop.bind(this));
+  }
+
+  menuLoop(timestamp: number) {
+    if (this.state === GameState.PLAYING) return;
+
+    const dt = Math.min((timestamp - this.lastTime) / 1000, 0.1);
+    this.lastTime = timestamp;
+
+    // Update stars/nebula/meteors
+    this.stars.forEach(star => {
+      star.update(dt);
+      if (star.position.y > this.height + 100) {
+        star.position.y = -100;
+        star.position.x = Math.random() * this.width;
+        if (star instanceof Meteor) star.markedForDeletion = true;
+      }
+    });
+    this.stars = this.stars.filter(s => !s.markedForDeletion);
+
+    if (Math.random() < 0.005) {
+      this.stars.push(new Meteor(this.width, this.height));
+    }
+
+    // Draw background only
+    this.renderer.setShake(0, 0);
+    this.renderer.clear();
+    this.stars.forEach(s => { if (s.type === EntityType.NEBULA) this.renderer.drawNebula(s as Nebula); });
+    this.stars.forEach(s => { if (s.type !== EntityType.NEBULA) { if (s instanceof Meteor) this.renderer.drawMeteor(s); else this.renderer.drawStar(s as Star); } });
+
+    requestAnimationFrame(this.menuLoop.bind(this));
+  }
+
   start() {
     this.entities = [];
     this.player = new Player(this.width / 2, this.height - 100);
@@ -439,6 +476,9 @@ export class GameEngine {
     if (this.player && this.player.markedForDeletion) {
       this.state = GameState.GAME_OVER;
       this.onGameOver(this.score);
+      // Restart background animation for the game over screen
+      this.lastTime = performance.now();
+      requestAnimationFrame(this.menuLoop.bind(this));
     }
   }
 

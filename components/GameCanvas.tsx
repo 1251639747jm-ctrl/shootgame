@@ -63,6 +63,9 @@ export const GameCanvas = forwardRef<GameRef, GameCanvasProps>(({
     window.addEventListener('resize', handleResize);
     handleResize();
 
+    // Start menu background animation immediately
+    engineRef.current.startMenuAnimation();
+
     return () => {
       window.removeEventListener('resize', handleResize);
     };
