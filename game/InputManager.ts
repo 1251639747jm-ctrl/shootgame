@@ -17,6 +17,8 @@ export class InputManager {
   // 鼠标
   mousePos: Vector2 = { x: 0, y: 0 };
   isMouseDown: boolean = false;
+  isClicked: boolean = false;       // 本帧是否有点击 (mouseup 时设 true, 消费后手动设 false)
+  lastClickPos: Vector2 = { x: 0, y: 0 };
 
   // --- 触屏状态 ---
   // 摇杆
@@ -59,7 +61,7 @@ export class InputManager {
     });
 
     window.addEventListener('mousedown', () => { this.isMouseDown = true; });
-    window.addEventListener('mouseup',   () => { this.isMouseDown = false; });
+    window.addEventListener('mouseup',   (e) => { this.isMouseDown = false; this.isClicked = true; this.lastClickPos = { x: e.clientX, y: e.clientY }; });
     window.addEventListener('mousemove', (e) => {
       this.mousePos = { x: e.clientX, y: e.clientY };
     });

@@ -14,7 +14,8 @@ export enum GameState {
   GAME_OVER,
   PAUSED,
   VICTORY,
-  PRACTICE // 武器试验场
+  PRACTICE, // 武器试验场
+  ROGUE     // 肉鸽模式
 }
 
 // 练习场里可生成的 Bot 类型
@@ -72,7 +73,8 @@ export enum WeaponType {
   RAILGUN,   // 电磁轨道炮: 高伤穿透
   SPREAD,    // 散弹: 7发扇形
   FLAK,      // 高射炮: 定时空爆 + 放射状碎片
-  HELIX      // 螺旋光子流: 双股正弦前进光弹
+  HELIX,     // 螺旋光子流: 双股正弦前进光弹
+  MAGIC_CIRCLE // 魔法阵 (肉鸽模式专属)
 }
 
 export enum ItemType {
