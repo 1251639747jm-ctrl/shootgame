@@ -4,6 +4,7 @@ import { BlackHole } from "./BlackHole";
 import { TeslaLightning } from "./Tesla";
 import { Bomb, Explosion } from "./Bomb";
 import { Missile } from "./Missile";
+import { EnemyLaser } from "./EnemyLaser";
 import { InputManager } from "./InputManager";
 import { Renderer } from "./Renderer";
 import { GameState, EntityType, GameConfig, WeaponType, ItemType, PlayerState, Vector2, GameSettings, BotKind } from "../types";
@@ -437,6 +438,42 @@ export class GameEngine {
                }
            }
       }
+      else if (this.player.currentWeapon === WeaponType.FLAK) {
+          // 高射炮: 中节奏, 定时空爆成弹片
+          if (isFiring && now - this.player.lastShotTime > 520) {
+              this.player.lastShotTime = now;
+              const wx = this.player.position.x;
+              const wy = this.player.position.y;
+              const rot = this.player.rotation;
+              // 单发为主, 满级后三发并排
+              const count = this.player.level >= 3 ? 3 : 1;
+              for (let i = 0; i < count; i++) {
+                  const off = (i - (count - 1) / 2) * 0.05;
+                  this.entities.push(new Bullet(wx + (i - (count - 1) / 2) * 14, wy, true, WeaponType.FLAK, off, rot, this.player));
+              }
+              this.addShake(4, 0.1);
+              for (let i = 0; i < 6; i++) {
+                  this.entities.push(new Particle(wx, wy - 10, '#fef3c7', 280, 0.2, 2));
+              }
+          }
+      }
+      else if (this.player.currentWeapon === WeaponType.HELIX) {
+          // 螺旋光子流: 双股正弦前进
+          if (isFiring && now - this.player.lastShotTime > 110) {
+              this.player.lastShotTime = now;
+              const wx = this.player.position.x;
+              const wy = this.player.position.y;
+              const rot = this.player.rotation;
+              // 两股: 相位差 PI, 一起发射 -> 像 DNA 双螺旋
+              this.entities.push(new Bullet(wx, wy, true, WeaponType.HELIX, 0,        rot, this.player));
+              this.entities.push(new Bullet(wx, wy, true, WeaponType.HELIX, Math.PI, rot, this.player));
+              // 等级高时多一对, 偏移点相位
+              if (this.player.level >= 3) {
+                  this.entities.push(new Bullet(wx, wy, true, WeaponType.HELIX,  Math.PI / 2, rot, this.player));
+                  this.entities.push(new Bullet(wx, wy, true, WeaponType.HELIX, -Math.PI / 2, rot, this.player));
+              }
+          }
+      }
       else if (this.player.currentWeapon === WeaponType.RAILGUN) {
           // 电磁轨道炮：慢节奏、高伤、穿透
           if (isFiring && now - this.player.lastShotTime > 650) {
@@ -545,6 +582,38 @@ export class GameEngine {
           });
       }
 
+      // FLAK: 引信到期 -> 空爆 + 散射碎片
+      if (entity instanceof Bullet &&
+          entity.weaponType === WeaponType.FLAK &&
+          entity.fuseMax > 0 &&
+          entity.fuseTimer <= 0 &&
+          !entity.markedForDeletion) {
+          entity.markedForDeletion = true;
+          const bx = entity.position.x;
+          const by = entity.position.y;
+          // 光效
+          this.createExplosion(bx, by, '#fde047', 18, 400);
+          this.entities.push(new Explosion(bx, by));
+          this.addShake(6, 0.15);
+          // 放射状碎片
+          const shards = entity.flakShards;
+          for (let i = 0; i < shards; i++) {
+              const ang = (i / shards) * Math.PI * 2 + Math.random() * 0.2;
+              const sp = 620 + Math.random() * 180;
+              const b = new Bullet(bx, by, true, WeaponType.FLAK, 0, 0, this.player);
+              b.velocity.x = Math.cos(ang) * sp;
+              b.velocity.y = Math.sin(ang) * sp;
+              b.color = '#fde047';
+              b.damage = entity.flakShardDamage;
+              b.radius = 4;
+              b.fuseMax = -1;
+              b.fuseTimer = -1;
+              // 碎片朝向 (纯视觉)
+              b.rotation = ang;
+              this.entities.push(b);
+          }
+      }
+
       // Black Hole Death
       if (entity instanceof BlackHole && entity.markedForDeletion && entity.life <= 0) {
           // Explode
@@ -561,6 +630,11 @@ export class GameEngine {
                   if (e.health <= 0) this.killEnemy(e);
               }
           });
+      }
+
+      // Boss 技能 tick (放在 fire 之前)
+      if (entity instanceof Enemy && entity.isBoss && !entity.isPractice) {
+          this.tickBossSkill(entity, dt);
       }
 
       // Enemy Fire
@@ -637,18 +711,19 @@ export class GameEngine {
                     }
                 }
             } else if (entity.type === EntityType.ENEMY_SNIPER) {
-                // 狙击机: 高伤慢速瞄准弹
+                // 狙击机: 预瞄激光 (短促红光束)
                 if (this.player) {
-                    const b = new Bullet(entity.position.x, entity.position.y + 10, false);
                     const dx = this.player.position.x - entity.position.x;
                     const dy = this.player.position.y - entity.position.y;
-                    const mag = Math.sqrt(dx*dx+dy*dy) || 1;
-                    b.velocity.x = (dx/mag) * 600;
-                    b.velocity.y = (dy/mag) * 600;
-                    b.damage = 20;
-                    b.radius = 9;
-                    (b as any).color = '#34d399';
-                    this.entities.push(b);
+                    // EnemyLaser 的 forward = (-sin(a), +cos(a)), 所以瞄 (dx, dy) 时:
+                    //   -sin(a)=dx/mag, cos(a)=dy/mag  ->  a = atan2(-dx, dy)
+                    const angle = Math.atan2(-dx, dy);
+                    this.entities.push(new EnemyLaser(
+                        { x: entity.position.x, y: entity.position.y + 10 },
+                        angle,
+                        entity,
+                        { tele: 0.55, fire: 0.35, maxWidth: 9, dps: 45, length: 1400, color: '#22c55e', offset: { x: 0, y: 10 } }
+                    ));
                 }
             } else if (entity.type === EntityType.ENEMY_SWARMER) {
                 // 蜂群: 双发小散射
@@ -695,6 +770,9 @@ export class GameEngine {
         }
       }
     });
+
+    // EnemyLaser 持续伤害扫描
+    this.tickEnemyLaserDamage(dt);
 
     this.checkCollisions();
 
@@ -1026,6 +1104,7 @@ export class GameEngine {
       else if (e instanceof Bullet) this.renderer.drawBullet(e);
       else if (e instanceof Missile) Missile.draw(this.ctx, e);
       else if (e instanceof Laser) Laser.draw(this.ctx, e);
+      else if (e instanceof EnemyLaser) EnemyLaser.draw(this.ctx, e);
       else if (e instanceof TeslaLightning) TeslaLightning.draw(this.ctx, e);
       else if (e instanceof Bomb) Bomb.draw(this.ctx, e);
       else if (e instanceof Explosion) Explosion.draw(this.ctx, e);
@@ -1044,5 +1123,232 @@ export class GameEngine {
         if (e instanceof Shield) this.renderer.drawSkillShield(e);
         if (e instanceof FloatingText) this.renderer.drawFloatingText(e);
     });
+  }
+
+  // ================== Boss 技能系统 ==================
+  /**
+   * 每帧对 Boss 做一次技能调度.
+   * 轻量 FSM: 冷却 -> telegraph -> active -> recover -> 冷却
+   * 技能根据 Boss 类型不同:
+   *   ENEMY_BOSS         : LASER_SWEEP  (旋转激光) / SPIRAL_SHOWER (螺旋密弹)
+   *   ENEMY_BOSS_CARRIER : SUMMON_WAVE (一次召唤 4-5 只僚机) / AIRSTRIKE (纵列 FLAK 式空爆弹)
+   *   ENEMY_BOSS_REAVER  : DASH_SLASH  (冲撞+爪击) / TWIN_LASERS (双斜射激光)
+   *
+   * 所有技能都在 Boss 头顶显示"警戒条"是靠 spawnFloatingText 实现, 比 UI 图开发快很多.
+   */
+  private tickBossSkill(boss: Enemy, dt: number) {
+    // 未进入屏幕时不释放技能
+    if (boss.position.y < 120) return;
+
+    // 激怒阶段 (血量 < 35%) 冷却缩短 1.6 倍
+    const hpRatio = boss.health / boss.maxHealth;
+    const enraged = hpRatio < 0.35;
+
+    if (!boss.skillActive) {
+        boss.skillTimer -= dt * (enraged ? 1.6 : 1);
+        if (boss.skillTimer <= 0) {
+            this.beginBossSkill(boss, enraged);
+        }
+        return;
+    }
+
+    // 活跃技能: 由各技能自己管理 skillPhaseTimer
+    boss.skillPhaseTimer += dt;
+    this.runBossSkill(boss, dt, enraged);
+  }
+
+  private beginBossSkill(boss: Enemy, enraged: boolean) {
+    // 在 Boss 支持的技能池里随机挑一个
+    let pool: string[] = [];
+    if (boss.type === EntityType.ENEMY_BOSS)         pool = ['LASER_SWEEP', 'SPIRAL_SHOWER'];
+    if (boss.type === EntityType.ENEMY_BOSS_CARRIER) pool = ['SUMMON_WAVE', 'AIRSTRIKE'];
+    if (boss.type === EntityType.ENEMY_BOSS_REAVER)  pool = ['DASH_SLASH', 'TWIN_LASERS'];
+
+    const skill = pool[Math.floor(Math.random() * pool.length)];
+    boss.skillActive = skill;
+    boss.skillPhaseTimer = 0;
+
+    // 全局警示
+    const label: Record<string, string> = {
+      LASER_SWEEP: '! 激光扫射 !',
+      SPIRAL_SHOWER: '! 螺旋弹幕 !',
+      SUMMON_WAVE: '! 召唤僚机 !',
+      AIRSTRIKE: '! 空爆打击 !',
+      DASH_SLASH: '! 冲撞突袭 !',
+      TWIN_LASERS: '! 双向激光 !'
+    };
+    this.spawnFloatingText(label[skill] || '! 技能 !', enraged ? '#f97316' : '#fde047', {
+      x: boss.position.x, y: boss.position.y - boss.radius - 20
+    });
+    this.addShake(6, 0.2);
+
+    // 按技能做一次"发动"(发射激光 / 召唤 / 等)
+    if (skill === 'LASER_SWEEP') {
+      // 一条旋转激光, 从斜左下开始, 慢速扫过 +-60 度
+      // aimAngle = 0 表示正下方, 所以 -PI/3 ~ +PI/3 就是左斜到右斜
+      const startAngle = -Math.PI / 3;
+      const rate = Math.PI / 3; // 3 秒扫 PI
+      this.entities.push(new EnemyLaser(
+        { x: boss.position.x, y: boss.position.y + 20 },
+        startAngle,
+        boss,
+        { tele: 0.7, fire: 2.0, maxWidth: 22, dps: 55, rotationRate: enraged ? rate * 1.5 : rate, offset: { x: 0, y: 20 } }
+      ));
+    } else if (skill === 'TWIN_LASERS') {
+      // 两条对称斜向激光 (不旋转, 短促但密)
+      [-1, 1].forEach(s => {
+        this.entities.push(new EnemyLaser(
+          { x: boss.position.x, y: boss.position.y + 20 },
+          s * Math.PI / 5,
+          boss,
+          { tele: 0.5, fire: 1.2, maxWidth: 18, dps: 50, offset: { x: 0, y: 20 } }
+        ));
+      });
+    } else if (skill === 'SUMMON_WAVE') {
+      // 一口气释放 5 只蜂群 + 可能 1 只狙击机
+      for (let i = 0; i < 5; i++) {
+        const sx = boss.position.x + (i - 2) * 36;
+        this.entities.push(new Enemy(sx, boss.position.y + 40, this.difficultyMultiplier * 0.9, false, EntityType.ENEMY_SWARMER));
+      }
+      if (enraged) {
+        this.entities.push(new Enemy(boss.position.x, boss.position.y + 50, this.difficultyMultiplier, false, EntityType.ENEMY_SNIPER));
+      }
+    } else if (skill === 'AIRSTRIKE') {
+      // 纵列掉下来的炸弹 (用 FLAK-like 敌弹: 直接用 Bullet 标红色并设定 fuseMax)
+      for (let i = 0; i < 6; i++) {
+        const sx = boss.position.x + (Math.random() - 0.5) * (this.width * 0.7);
+        const b = new Bullet(sx, boss.position.y + 30, false);
+        b.velocity.x = 0;
+        b.velocity.y = 260;
+        b.radius = 9;
+        b.damage = 16;
+        (b as any)._isAirstrike = true;
+        // 引信 1.1 ~ 1.6s
+        b.fuseMax = 1.0 + Math.random() * 0.6;
+        b.fuseTimer = b.fuseMax;
+        b.flakShards = 6;
+        b.flakShardDamage = 10;
+        b.color = '#fb923c';
+        this.entities.push(b);
+      }
+    }
+    // DASH_SLASH 在 runBossSkill 里管 (需要逐帧移动)
+  }
+
+  private runBossSkill(boss: Enemy, dt: number, enraged: boolean) {
+    const t = boss.skillPhaseTimer;
+    const s = boss.skillActive;
+
+    if (s === 'LASER_SWEEP' || s === 'TWIN_LASERS') {
+      // 等激光结束 (2.2s ~ 2.7s)
+      if (t > (s === 'LASER_SWEEP' ? 2.8 : 1.8)) {
+        boss.skillActive = null;
+        boss.skillTimer = enraged ? 4.5 : 7.0;
+      }
+      return;
+    }
+
+    if (s === 'SUMMON_WAVE') {
+      if (t > 0.6) {
+        boss.skillActive = null;
+        boss.skillTimer = enraged ? 6 : 9;
+      }
+      return;
+    }
+
+    if (s === 'AIRSTRIKE') {
+      if (t > 1.2) {
+        boss.skillActive = null;
+        boss.skillTimer = enraged ? 5 : 8;
+      }
+      return;
+    }
+
+    if (s === 'SPIRAL_SHOWER') {
+      // 持续 1.6 秒, 每 60ms 发一圈 6 发
+      const ticks = Math.floor(t / 0.06);
+      const prev  = Math.floor((t - dt) / 0.06);
+      if (ticks > prev) {
+        const n = 6;
+        const rot = t * 4; // 旋转
+        for (let i = 0; i < n; i++) {
+          const ang = (i / n) * Math.PI * 2 + rot;
+          const b = new Bullet(boss.position.x, boss.position.y, false);
+          b.velocity.x = Math.cos(ang) * 280;
+          b.velocity.y = Math.sin(ang) * 280;
+          b.radius = 5;
+          b.damage = 8;
+          b.color = '#38bdf8';
+          this.entities.push(b);
+        }
+      }
+      if (t > 1.8) {
+        boss.skillActive = null;
+        boss.skillTimer = enraged ? 4 : 7;
+      }
+      return;
+    }
+
+    if (s === 'DASH_SLASH') {
+      // 分三阶段: 0-0.5 蓄力(朝玩家)  0.5-1.1 冲刺  1.1-1.6 回位
+      if (!this.player) { boss.skillActive = null; boss.skillTimer = 5; return; }
+      if (t < 0.5) {
+        // 蓄力 - Boss 轻微后退
+        boss.position.y -= 60 * dt;
+      } else if (t < 1.1) {
+        // 冲刺: 朝玩家位置直冲
+        const dx = this.player.position.x - boss.position.x;
+        const dy = this.player.position.y - boss.position.y;
+        const mag = Math.sqrt(dx * dx + dy * dy) || 1;
+        const dashSp = enraged ? 780 : 560;
+        boss.position.x += (dx / mag) * dashSp * dt;
+        boss.position.y += (dy / mag) * dashSp * dt;
+        // 留下高速痕迹
+        if (Math.random() < 0.6) {
+          this.entities.push(new Particle(boss.position.x, boss.position.y, '#ef4444', 40, 0.35, 6));
+        }
+      } else if (t < 1.6) {
+        // 回位 (缓慢上升)
+        boss.position.y -= 120 * dt;
+      } else {
+        boss.skillActive = null;
+        boss.skillTimer = enraged ? 4 : 6;
+      }
+    }
+  }
+
+  // ================== EnemyLaser 每帧伤害扫描 ==================
+  private tickEnemyLaserDamage(dt: number) {
+    if (!this.player || this.player.markedForDeletion) return;
+    // 练习场玩家无敌, 短路
+    if (this.player.invincible) return;
+    // 护盾开启时直接吸收
+    if (this.player.skills.shield.active) return;
+
+    for (const e of this.entities) {
+      if (!(e instanceof EnemyLaser)) continue;
+      const laser = e as EnemyLaser;
+      if (laser.phase !== 'fire') continue;
+
+      const mul = laser.hitTest(this.player.position.x, this.player.position.y, this.player.radius);
+      if (mul <= 0) continue;
+
+      const dmg = laser.dps * dt * mul;
+      this.player.health -= dmg;
+      this.onHealthChange(this.player.health);
+
+      // 抖屏 + 偶尔飘字 (不要每帧都飘)
+      if (Math.random() < 0.12) {
+        this.spawnFloatingText('-' + Math.ceil(dmg * 8), '#ff6b6b', this.player.position);
+      }
+      this.addShake(3, 0.06);
+
+      if (this.player.health <= 0) {
+        this.player.markedForDeletion = true;
+        this.createExplosion(this.player.position.x, this.player.position.y, '#00eaff', 60, 500);
+      }
+      // 激光同一帧不重复伤害同一个玩家
+      break;
+    }
   }
 }

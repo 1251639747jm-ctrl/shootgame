@@ -70,7 +70,9 @@ export enum WeaponType {
   TESLA,
   BOMB,
   RAILGUN,   // 电磁轨道炮: 高伤穿透
-  SPREAD     // 散弹: 7发扇形
+  SPREAD,    // 散弹: 7发扇形
+  FLAK,      // 高射炮: 定时空爆 + 放射状碎片
+  HELIX      // 螺旋光子流: 双股正弦前进光弹
 }
 
 export enum ItemType {

@@ -243,6 +243,47 @@ export class Renderer {
                 ctx.beginPath();
                 ctx.arc(0, 0, 3, 0, Math.PI * 2);
                 ctx.fill();
+            } else if (bullet.weaponType === WeaponType.FLAK) {
+                // 高射炮: 带引信的黄色弹
+                // 有引信 (未空爆) -> 画子弹主体
+                if (bullet.fuseMax > 0) {
+                    // 外晕
+                    ctx.fillStyle = 'rgba(251, 191, 36, 0.4)';
+                    ctx.beginPath();
+                    ctx.arc(0, 0, 12, 0, Math.PI * 2);
+                    ctx.fill();
+                    // 壳体
+                    ctx.fillStyle = '#78350f';
+                    ctx.fillRect(-4, -8, 8, 16);
+                    ctx.fillStyle = '#fbbf24';
+                    ctx.fillRect(-3, -7, 6, 14);
+                    // 警告灯闪烁
+                    const blink = (performance.now() * 0.02) % 1 < 0.5;
+                    ctx.fillStyle = blink ? '#fef08a' : '#f97316';
+                    ctx.beginPath();
+                    ctx.arc(0, 0, 2, 0, Math.PI * 2);
+                    ctx.fill();
+                } else {
+                    // 空爆后的碎片: 亮色长尾
+                    ctx.fillStyle = 'rgba(253, 224, 71, 0.55)';
+                    ctx.fillRect(-3, -10, 6, 14);
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillRect(-1, -10, 2, 14);
+                }
+            } else if (bullet.weaponType === WeaponType.HELIX) {
+                // 螺旋: 绿色光子团
+                ctx.fillStyle = 'rgba(74, 222, 128, 0.45)';
+                ctx.beginPath();
+                ctx.arc(0, 0, 9, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = '#d1fae5';
+                ctx.beginPath();
+                ctx.arc(0, 0, 5, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = '#ffffff';
+                ctx.beginPath();
+                ctx.arc(0, 0, 2.5, 0, Math.PI * 2);
+                ctx.fill();
             } else {
                 // VULCAN 默认
                 ctx.fillStyle = 'rgba(250, 204, 21, 0.35)';
@@ -251,15 +292,33 @@ export class Renderer {
                 ctx.fillRect(-2, -20, 4, 35);
             }
         } else {
-            // 敌方子弹
-            ctx.fillStyle = 'rgba(255, 0, 85, 0.35)';
-            ctx.beginPath();
-            ctx.arc(0, 0, 10, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.fillStyle = '#ffffff';
-            ctx.beginPath();
-            ctx.arc(0, 0, 4, 0, Math.PI * 2);
-            ctx.fill();
+            // 敌方子弹 - 空投式 FLAK 专门绘制
+            if (bullet.weaponType === WeaponType.VULCAN && (bullet as any)._isAirstrike) {
+                // 下落的炸弹
+                ctx.fillStyle = 'rgba(251, 146, 60, 0.35)';
+                ctx.beginPath();
+                ctx.arc(0, 0, 14, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = '#7f1d1d';
+                ctx.beginPath();
+                ctx.arc(0, 0, 7, 0, Math.PI * 2);
+                ctx.fill();
+                // 警告闪烁
+                const blink = (performance.now() * 0.025) % 1 < 0.5;
+                ctx.fillStyle = blink ? '#fef08a' : '#f97316';
+                ctx.beginPath();
+                ctx.arc(0, 0, 3, 0, Math.PI * 2);
+                ctx.fill();
+            } else {
+                ctx.fillStyle = 'rgba(255, 0, 85, 0.35)';
+                ctx.beginPath();
+                ctx.arc(0, 0, 10, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = '#ffffff';
+                ctx.beginPath();
+                ctx.arc(0, 0, 4, 0, Math.PI * 2);
+                ctx.fill();
+            }
         }
         ctx.restore();
     }

@@ -49,7 +49,9 @@ export class Player extends Entity {
         WeaponType.RAILGUN,
         WeaponType.PLASMA,
         WeaponType.TESLA,
-        WeaponType.BOMB
+        WeaponType.BOMB,
+        WeaponType.FLAK,
+        WeaponType.HELIX
     ];
     damageMultiplier: number = 1;
 
@@ -171,6 +173,13 @@ export class Enemy extends Entity {
     // Boss 阶段相位计时: 用于复杂 Boss 弹幕模式切换
     phaseTimer: number = 0;
     phaseIndex: number = 0;
+
+    // Boss 技能系统 (仅 Boss 使用)
+    skillCooldown: number = 8;       // 技能间隔 (秒)
+    skillTimer: number = 6;          // 开场 6s 后第一次释放
+    skillActive: string | null = null; // 当前活跃技能名 (null = 无)
+    skillPhaseTimer: number = 0;     // 技能持续时间
+    dashSpeed: number = 0;           // 冲撞技能用
 
     constructor(
         x: number,
@@ -429,6 +438,21 @@ export class Bullet extends Entity {
     piercing: boolean = false;
     hitEnemies: Set<any> = new Set();
 
+    // FLAK 专用: 多少秒后空爆 (负数=不空爆)
+    fuseTimer: number = -1;
+    fuseMax: number = -1;
+    // FLAK 空爆时散射的碎片数 & 碎片伤害
+    flakShards: number = 10;
+    flakShardDamage: number = 14;
+
+    // HELIX 专用: 正弦摆动
+    helixPhase: number = 0;      // 初始相位 (0 或 PI, 决定双股分离)
+    helixFreq: number = 8;       // 摆动频率
+    helixAmp: number = 18;       // 摆动幅度 (像素)
+    helixAge: number = 0;        // 发射后经过时间
+    baseDir: Vector2 = { x: 0, y: 0 }; // 沿朝向的基础速度 (恒定)
+    basePos: Vector2 = { x: 0, y: 0 }; // 发射位置 (用于算摆动)
+
     constructor(
         x: number,
         y: number,
@@ -463,6 +487,29 @@ export class Bullet extends Entity {
                 this.color = '#fb923c';
                 this.damage = 18 * dmgMul;
                 this.radius = 4;
+            } else if (weaponType === WeaponType.FLAK) {
+                // 高射弹: 向上发射, 到一定时间后自爆
+                const speed = 680;
+                this.velocity.x = Math.sin(this.rotation) * speed;
+                this.velocity.y = -Math.cos(this.rotation) * speed;
+                this.color = '#fbbf24';
+                this.damage = 30 * dmgMul;
+                this.flakShardDamage = 22 * dmgMul;
+                this.radius = 7;
+                this.fuseMax = 0.55; // 0.55 秒后空爆
+                this.fuseTimer = this.fuseMax;
+            } else if (weaponType === WeaponType.HELIX) {
+                // 螺旋光弹: 初速度恒定, 靠 update 做正弦位移
+                const speed = 820;
+                this.baseDir = { x: Math.sin(this.rotation) * speed, y: -Math.cos(this.rotation) * speed };
+                this.basePos = { x, y };
+                this.velocity.x = this.baseDir.x;
+                this.velocity.y = this.baseDir.y;
+                this.color = '#86efac';
+                this.damage = 22 * dmgMul;
+                this.radius = 5;
+                // helixPhase 由 angleOffset 传进来 (0 或 PI, 决定哪一股)
+                this.helixPhase = angleOffset;
             } else {
                 // VULCAN / 其他
                 const speed = 900;
@@ -480,8 +527,29 @@ export class Bullet extends Entity {
     }
 
     update(dt: number) {
+        // HELIX: 用正弦摆动覆盖速度
+        if (this.weaponType === WeaponType.HELIX && this.type === EntityType.BULLET_PLAYER) {
+            this.helixAge += dt;
+            // 沿朝向推进
+            this.basePos.x += this.baseDir.x * dt;
+            this.basePos.y += this.baseDir.y * dt;
+            // 法向量 (对朝向正交)
+            const nx =  Math.cos(this.rotation);
+            const ny =  Math.sin(this.rotation);
+            const wave = Math.sin(this.helixAge * this.helixFreq + this.helixPhase) * this.helixAmp;
+            this.position.x = this.basePos.x + nx * wave;
+            this.position.y = this.basePos.y + ny * wave;
+            return;
+        }
+
         this.position.x += this.velocity.x * dt;
         this.position.y += this.velocity.y * dt;
+
+        // FLAK: 定时空爆 (GameEngine 会处理碎片生成)
+        if (this.fuseTimer > 0) {
+            this.fuseTimer -= dt;
+            // 保留标记, 让 GameEngine 在 fuseTimer<=0 时生成散弹
+        }
     }
 }
 

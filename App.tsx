@@ -1,14 +1,17 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { GameCanvas } from './components/GameCanvas';
 import { GameState, WeaponType, GameRef, PlayerState, GameSettings, BotKind } from './types';
-import { Rocket, Trophy, Heart, Crosshair, Zap, Disc, Hexagon, Shield, CircleDot, Activity, Bomb, Settings, X, Waves, Crosshair as Scope, Target, LogOut, Trash2, Swords } from 'lucide-react';
+import {
+  VulcanIcon, SpreadIcon, LaserIcon, RailgunIcon, MissileIcon, TeslaIcon, BombIcon, FlakIcon, HelixIcon,
+  ShieldSkillIcon, BlackHoleIcon, ShockwaveIcon,
+  ArmorIcon, EnergyIcon, TrophyIcon, RocketIcon, CrosshairIcon, TargetIcon,
+  SettingsIcon, ExitIcon, TrashIcon, SwordsIcon, CloseIcon
+} from './components/GameIcons';
 
 /**
- * 专门用于手机按钮的 Hook / HOC：
- *   - 按下 (pointerdown / touchstart) 立即触发 onPress
- *   - 把触摸标记为 "UI 触摸"，InputManager 会忽略它，
- *     因此技能按钮可以和摇杆、射击同时按
- *   - 阻止事件冒泡/默认，防止点击按钮时触发移动或开火
+ * 多点触控 UI 按钮 hook:
+ *  - 把触摸标记为 "UI 触摸" 避免和游戏摇杆/开火冲突
+ *  - 按下即触发 onPress, 支持鼠标 + 触屏
  */
 function useUIButtonProps(
   gameRef: React.RefObject<GameRef>,
@@ -19,30 +22,22 @@ function useUIButtonProps(
 
   const handleTouchStart = (e: React.TouchEvent) => {
     if (disabled) return;
-    e.preventDefault();
-    e.stopPropagation();
-    // 把本次按下的每个手指注册为 UI 触摸
+    e.preventDefault(); e.stopPropagation();
     for (let i = 0; i < e.changedTouches.length; i++) {
       gameRef.current?.markUITouch(e.changedTouches[i].identifier);
     }
     onPress();
   };
-
   const handleTouchEnd = (e: React.TouchEvent) => {
-    // 解除 UI 触摸标记
     for (let i = 0; i < e.changedTouches.length; i++) {
       gameRef.current?.unmarkUITouch(e.changedTouches[i].identifier);
     }
   };
-
-  // 桌面：鼠标点击按正常路径走即可
   const handleMouseDown = (e: React.MouseEvent) => {
     if (disabled) return;
-    e.preventDefault();
-    e.stopPropagation();
+    e.preventDefault(); e.stopPropagation();
     onPress();
   };
-
   return {
     onTouchStart: handleTouchStart,
     onTouchEnd: handleTouchEnd,
@@ -50,6 +45,26 @@ function useUIButtonProps(
     onMouseDown: handleMouseDown
   };
 }
+
+// =====================================================================
+// 武器元数据: 图标 / 名称 / 主色
+// =====================================================================
+type WeaponMeta = {
+  label: string;
+  color: string;
+  Icon: React.FC<{ size?: number; active?: boolean; className?: string }>;
+};
+const WEAPON_META: Record<WeaponType, WeaponMeta> = {
+  [WeaponType.VULCAN]:  { label: 'VULCAN',   color: '#facc15', Icon: VulcanIcon },
+  [WeaponType.SPREAD]:  { label: 'SCATTER',  color: '#fb923c', Icon: SpreadIcon },
+  [WeaponType.LASER]:   { label: 'HYPER BEAM', color: '#22d3ee', Icon: LaserIcon },
+  [WeaponType.RAILGUN]: { label: 'RAILGUN',  color: '#a78bfa', Icon: RailgunIcon },
+  [WeaponType.PLASMA]:  { label: 'MISSILE',  color: '#f472b6', Icon: MissileIcon },
+  [WeaponType.TESLA]:   { label: 'TESLA',    color: '#67e8f9', Icon: TeslaIcon },
+  [WeaponType.BOMB]:    { label: 'DOOM BOMB', color: '#ef4444', Icon: BombIcon },
+  [WeaponType.FLAK]:    { label: 'FLAK',     color: '#f59e0b', Icon: FlakIcon },
+  [WeaponType.HELIX]:   { label: 'HELIX',    color: '#4ade80', Icon: HelixIcon }
+};
 
 const App: React.FC = () => {
   const [gameState, setGameState] = useState<GameState>(GameState.MENU);
@@ -60,14 +75,10 @@ const App: React.FC = () => {
     const saved = localStorage.getItem('thunder_stealth_highscore');
     return saved ? parseInt(saved, 10) : 0;
   });
-
   const [playerState, setPlayerState] = useState<PlayerState | null>(null);
-
-  // Joystick visual state (repainted every 50ms along with playerState)
   const [joystick, setJoystick] = useState<{ active: boolean; base: { x: number; y: number }; knob: { x: number; y: number } }>({
     active: false, base: { x: 0, y: 0 }, knob: { x: 0, y: 0 }
   });
-
   const [showSettings, setShowSettings] = useState(false);
   const [settings, setSettings] = useState<GameSettings>({
     difficulty: 'NORMAL',
@@ -94,54 +105,21 @@ const App: React.FC = () => {
 
   const handleStartGame = () => {
     setGameState(GameState.PLAYING);
-    setScore(0);
-    setHealth(100);
-    setPlayerState(null);
+    setScore(0); setHealth(100); setPlayerState(null);
   };
-
   const handleStartPractice = () => {
     setGameState(GameState.PRACTICE);
-    setScore(0);
-    setHealth(100);
-    setPlayerState(null);
+    setScore(0); setHealth(100); setPlayerState(null);
   };
-
   const handleExitPractice = () => {
     setGameState(GameState.MENU);
     setPlayerState(null);
   };
-
   const handleGameOver = (finalScore: number) => {
     setGameState(GameState.GAME_OVER);
     if (finalScore > highScore) {
       setHighScore(finalScore);
       localStorage.setItem('thunder_stealth_highscore', finalScore.toString());
-    }
-  };
-
-  const getWeaponIcon = () => {
-    switch (currentWeapon) {
-      case WeaponType.LASER:   return <Zap size={24} className="text-cyan-400" />;
-      case WeaponType.PLASMA:  return <Disc size={24} className="text-fuchsia-400" />;
-      case WeaponType.TESLA:   return <Activity size={24} className="text-blue-200" />;
-      case WeaponType.BOMB:    return <Bomb size={24} className="text-red-400" />;
-      case WeaponType.RAILGUN: return <Scope size={24} className="text-violet-300" />;
-      case WeaponType.SPREAD:  return <Waves size={24} className="text-orange-400" />;
-      case WeaponType.VULCAN:
-      default:                 return <Hexagon size={24} className="text-yellow-400" />;
-    }
-  };
-
-  const getWeaponName = () => {
-    switch (currentWeapon) {
-      case WeaponType.LASER:   return "HYPER BEAM";
-      case WeaponType.PLASMA:  return "TRACKING MSL";
-      case WeaponType.TESLA:   return "TESLA COIL";
-      case WeaponType.BOMB:    return "DOOM BOMB";
-      case WeaponType.RAILGUN: return "RAILGUN";
-      case WeaponType.SPREAD:  return "SCATTER GUN";
-      case WeaponType.VULCAN:  return "VULCAN CANNON";
-      default:                 return "";
     }
   };
 
@@ -152,96 +130,220 @@ const App: React.FC = () => {
     return (s.current / s.max) * 100;
   };
 
-  // ---- 技能按钮 (多点触控友好) ----
+  // ====================================================================
+  // 技能按钮 (自绘 SVG + 冷却环)
+  // ====================================================================
   const SkillButton: React.FC<{
     index: number;
-    icon: React.ReactNode;
+    Icon: React.FC<{ size?: number; active?: boolean }>;
+    label: string;
     skillKey: 'shield' | 'blackhole' | 'shockwave';
-    colorClass: string;
-  }> = ({ index, icon, skillKey, colorClass }) => {
+    hotkey: string;
+    color: string;
+  }> = ({ index, Icon, label, skillKey, hotkey, color }) => {
     const cooldownPct = getSkillCooldownPercent(skillKey);
     const isReady = cooldownPct === 0;
     const isActive = playerState?.skills[skillKey].active;
+    const btnProps = useUIButtonProps(gameRef, () => gameRef.current?.triggerSkill(index), { disabled: !isReady });
 
-    const btnProps = useUIButtonProps(
-      gameRef,
-      () => gameRef.current?.triggerSkill(index),
-      { disabled: !isReady }
-    );
+    const CIRC = 2 * Math.PI * 30;
+    const dashOffset = CIRC * (1 - cooldownPct / 100);
 
     return (
       <button
         {...btnProps}
         disabled={!isReady}
         data-ui-button="skill"
-        className={`relative flex flex-col items-center justify-center w-16 h-16 rounded overflow-hidden transition-all ${
-          isReady ? 'active:scale-95 hover:brightness-110' : 'opacity-80'
-        }`}
+        className={`relative flex items-center justify-center w-[68px] h-[68px] rounded-full transition-transform ${isReady ? 'active:scale-90 hover:scale-105' : 'opacity-85'}`}
         style={{
-          backgroundColor: 'rgba(10, 20, 40, 0.8)',
-          borderColor: isReady ? 'rgba(255,255,255,0.4)' : 'rgba(255,255,255,0.1)',
-          borderWidth: '1px',
+          background: `radial-gradient(circle at 30% 30%, rgba(20,30,60,0.95), rgba(0,0,0,0.85))`,
+          boxShadow: isActive
+            ? `0 0 24px ${color}, inset 0 0 14px ${color}`
+            : isReady
+              ? `0 0 14px ${color}40, inset 0 0 6px ${color}30`
+              : `inset 0 0 6px rgba(0,0,0,0.6)`,
+          border: `2px solid ${isReady ? color : '#3f3f46'}`,
           touchAction: 'none'
         }}
       >
+        {/* 冷却扇形环 (SVG) */}
         {!isReady && (
-          <div
-            className="absolute inset-0 bg-black/60 z-20 flex items-center justify-center"
-            style={{ height: `${cooldownPct}%`, bottom: 0, top: 'auto' }}
-          />
+          <svg className="absolute inset-0 -rotate-90" width="68" height="68" viewBox="0 0 68 68">
+            <circle cx="34" cy="34" r="30" stroke="rgba(0,0,0,0.75)" strokeWidth="4" fill="none" />
+            <circle
+              cx="34" cy="34" r="30"
+              stroke={color} strokeWidth="3" fill="none"
+              strokeDasharray={CIRC}
+              strokeDashoffset={dashOffset}
+              strokeLinecap="round"
+              opacity="0.55"
+            />
+          </svg>
         )}
+
         {!isReady && (
-          <span className="absolute z-30 font-bold text-white text-sm drop-shadow-md">
+          <span className="absolute z-20 text-white font-bold text-base drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)]">
             {Math.ceil(playerState?.skills[skillKey].current || 0)}
           </span>
         )}
-        {isActive && <div className={`absolute inset-0 z-0 animate-pulse ${colorClass} opacity-30`} />}
-        <div className={`relative z-10 ${isReady ? colorClass : 'text-gray-500'}`}>{icon}</div>
-        <span className={`text-[10px] mt-1 font-bold z-10 ${isReady ? 'text-white' : 'text-gray-500'}`}>{index}</span>
+
+        <Icon size={30} active={isReady} />
+
+        {/* 数字快捷键角标 */}
+        <span
+          className="absolute -top-1 -right-1 w-5 h-5 rounded-full text-[10px] font-black flex items-center justify-center"
+          style={{
+            background: `linear-gradient(135deg, ${color}, rgba(0,0,0,0.9))`,
+            color: '#fff',
+            border: `1px solid ${color}`,
+            boxShadow: `0 0 4px ${color}`
+          }}
+        >
+          {hotkey}
+        </span>
       </button>
     );
   };
 
-  // ---- 换武器按钮 (多点触控友好) ----
+  // ====================================================================
+  // 换武器按钮 (六边形, SVG 图标 + 彩色装饰)
+  // ====================================================================
   const WeaponButton: React.FC = () => {
     const btnProps = useUIButtonProps(gameRef, () => gameRef.current?.switchWeapon());
+    const meta = WEAPON_META[currentWeapon];
     return (
       <button
         {...btnProps}
         data-ui-button="weapon"
         style={{ touchAction: 'none' }}
-        className="flex flex-col items-center justify-center w-24 h-24 bg-black/60 border-2 border-cyan-500/50 rounded-lg backdrop-blur-md active:scale-95 transition-all duration-150 group shadow-[0_0_20px_rgba(0,255,255,0.15)] hover:bg-cyan-900/30"
+        className="relative w-28 h-28 group"
       >
-        <div className="mb-2 group-hover:scale-110 transition-transform duration-300 drop-shadow-[0_0_10px_rgba(255,255,255,0.5)]">
-          {getWeaponIcon()}
+        {/* 六角形背景 */}
+        <svg viewBox="0 0 100 100" className="absolute inset-0 w-full h-full drop-shadow-[0_0_12px_rgba(0,255,255,0.25)]">
+          <defs>
+            <linearGradient id="wbg" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stopColor="rgba(20,40,70,0.95)" />
+              <stop offset="1" stopColor="rgba(3,7,18,0.95)" />
+            </linearGradient>
+          </defs>
+          <polygon
+            points="50,4 92,27 92,73 50,96 8,73 8,27"
+            fill="url(#wbg)"
+            stroke={meta.color}
+            strokeWidth="2.2"
+          />
+          <polygon
+            points="50,10 86,30 86,70 50,90 14,70 14,30"
+            fill="none"
+            stroke={meta.color}
+            strokeWidth="1"
+            opacity="0.4"
+          />
+        </svg>
+        <div className="relative z-10 flex flex-col items-center justify-center h-full">
+          <meta.Icon size={36} active />
+          <span className="text-[9px] font-bold tracking-[0.15em] mt-1" style={{ color: meta.color, textShadow: `0 0 4px ${meta.color}80` }}>
+            {meta.label}
+          </span>
         </div>
-        <span className="text-[10px] text-cyan-100 font-bold tracking-widest">{getWeaponName()}</span>
       </button>
     );
   };
 
-  // ---- 虚拟摇杆 (HUD) ----
+  // ====================================================================
+  // 虚拟摇杆
+  // ====================================================================
   const Joystick: React.FC = () => {
     if (!joystick.active) return null;
     return (
       <>
-        <div
-          className="pointer-events-none absolute rounded-full border-2 border-cyan-300/60 bg-cyan-400/10"
-          style={{
-            width: 140, height: 140,
-            left: joystick.base.x - 70,
-            top: joystick.base.y - 70
-          }}
-        />
-        <div
-          className="pointer-events-none absolute rounded-full bg-cyan-300/70 border border-white/80 shadow-[0_0_18px_rgba(0,255,255,0.6)]"
-          style={{
-            width: 56, height: 56,
-            left: joystick.knob.x - 28,
-            top: joystick.knob.y - 28
-          }}
-        />
+        <svg
+          className="pointer-events-none absolute"
+          style={{ left: joystick.base.x - 70, top: joystick.base.y - 70 }}
+          width="140" height="140" viewBox="0 0 140 140"
+        >
+          <defs>
+            <radialGradient id="joyBase" cx="0.5" cy="0.5" r="0.5">
+              <stop offset="0.6" stopColor="rgba(34,211,238,0.0)" />
+              <stop offset="0.85" stopColor="rgba(34,211,238,0.45)" />
+              <stop offset="1" stopColor="rgba(34,211,238,0.1)" />
+            </radialGradient>
+          </defs>
+          <circle cx="70" cy="70" r="68" fill="url(#joyBase)" />
+          <circle cx="70" cy="70" r="68" fill="none" stroke="rgba(125,211,252,0.7)" strokeWidth="1.5" strokeDasharray="4 4" />
+          {/* 内圈刻度 */}
+          {[0, 45, 90, 135, 180, 225, 270, 315].map((deg, i) => {
+            const r = (deg * Math.PI) / 180;
+            const x1 = 70 + Math.cos(r) * 54;
+            const y1 = 70 + Math.sin(r) * 54;
+            const x2 = 70 + Math.cos(r) * 62;
+            const y2 = 70 + Math.sin(r) * 62;
+            return <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} stroke="rgba(125,211,252,0.4)" strokeWidth="1" />;
+          })}
+        </svg>
+        <svg
+          className="pointer-events-none absolute"
+          style={{ left: joystick.knob.x - 32, top: joystick.knob.y - 32 }}
+          width="64" height="64" viewBox="0 0 64 64"
+        >
+          <defs>
+            <radialGradient id="joyKnob" cx="0.35" cy="0.3" r="0.7">
+              <stop offset="0" stopColor="#a5f3fc" />
+              <stop offset="0.6" stopColor="#22d3ee" />
+              <stop offset="1" stopColor="#0891b2" />
+            </radialGradient>
+          </defs>
+          <circle cx="32" cy="32" r="28" fill="url(#joyKnob)" stroke="#e0f2fe" strokeWidth="1.5" />
+          <circle cx="32" cy="32" r="28" fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth="0.8" />
+          <circle cx="32" cy="32" r="10" fill="rgba(255,255,255,0.4)" />
+        </svg>
       </>
+    );
+  };
+
+  // ====================================================================
+  // 状态条 (血量/能量) - 全部自绘
+  // ====================================================================
+  const StatBar: React.FC<{
+    label: string;
+    icon: React.ReactNode;
+    value: number;
+    max: number;
+    color: string;
+    color2: string;
+    criticalPulse?: boolean;
+  }> = ({ label, icon, value, max, color, color2, criticalPulse }) => {
+    const pct = Math.max(0, Math.min(1, value / max));
+    const critical = criticalPulse && pct < 0.3;
+    return (
+      <div className="bg-[rgba(3,7,18,0.75)] backdrop-blur-md border border-white/10 rounded-md px-2 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+        <div className="flex items-center justify-between mb-1">
+          <div className="flex items-center gap-1.5" style={{ color }}>
+            {icon}
+            <span className="text-[10px] font-bold tracking-[0.25em]">{label}</span>
+          </div>
+          <span className="text-[10px] text-white/80 font-mono">
+            {Math.ceil(value)}<span className="text-white/40">/{Math.floor(max)}</span>
+          </span>
+        </div>
+        <div className="relative h-2.5 rounded-sm overflow-hidden bg-black/60 border border-white/10">
+          {/* 渐变填充 */}
+          <div
+            className={`h-full transition-all duration-200 ${critical ? 'animate-pulse' : ''}`}
+            style={{
+              width: `${pct * 100}%`,
+              background: `linear-gradient(90deg, ${color2}, ${color})`,
+              boxShadow: `0 0 8px ${color}80`
+            }}
+          />
+          {/* 刻度 */}
+          <div className="absolute inset-0 flex">
+            {[25, 50, 75].map(n => (
+              <div key={n} className="h-full border-l border-black/50" style={{ marginLeft: `${n}%`, position: 'absolute' }} />
+            ))}
+          </div>
+        </div>
+      </div>
     );
   };
 
@@ -259,25 +361,27 @@ const App: React.FC = () => {
         onWeaponChange={setCurrentWeapon}
       />
 
-      {/* SETTINGS MODAL */}
+      {/* =============== SETTINGS MODAL =============== */}
       {showSettings && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
-          <div className="bg-gray-900 border border-cyan-500/50 p-6 rounded-lg w-80 shadow-2xl relative">
+          <div className="bg-[rgba(10,20,40,0.95)] border-2 border-cyan-500/60 p-6 rounded-xl w-80 shadow-[0_0_40px_rgba(0,255,255,0.25)] relative">
             <button onClick={() => setShowSettings(false)} className="absolute top-2 right-2 text-gray-400 hover:text-white">
-              <X size={24} />
+              <CloseIcon size={24} />
             </button>
             <h2 className="text-xl font-bold text-cyan-400 mb-6 flex items-center gap-2">
-              <Settings size={20} /> SETTINGS
+              <SettingsIcon size={22} /> SETTINGS
             </h2>
             <div className="space-y-6">
               <div>
-                <label className="block text-sm text-gray-400 mb-2">DIFFICULTY</label>
-                <div className="flex bg-black/50 rounded p-1">
+                <label className="block text-sm text-gray-400 mb-2 tracking-widest">DIFFICULTY</label>
+                <div className="flex bg-black/50 rounded p-1 gap-1">
                   {(['EASY', 'NORMAL', 'HARD'] as const).map(d => (
                     <button
                       key={d}
                       onClick={() => setSettings({ ...settings, difficulty: d })}
-                      className={`flex-1 py-1 text-xs font-bold rounded ${settings.difficulty === d ? 'bg-cyan-600 text-white' : 'text-gray-500 hover:text-gray-300'}`}
+                      className={`flex-1 py-1.5 text-xs font-bold rounded transition ${settings.difficulty === d
+                        ? 'bg-gradient-to-b from-cyan-500 to-cyan-700 text-white shadow-[0_0_10px_rgba(0,200,255,0.5)]'
+                        : 'text-gray-500 hover:text-gray-300 hover:bg-white/5'}`}
                     >
                       {d}
                     </button>
@@ -285,13 +389,15 @@ const App: React.FC = () => {
                 </div>
               </div>
               <div>
-                <label className="block text-sm text-gray-400 mb-2">EFFECTS QUALITY</label>
-                <div className="flex bg-black/50 rounded p-1">
+                <label className="block text-sm text-gray-400 mb-2 tracking-widest">EFFECTS QUALITY</label>
+                <div className="flex bg-black/50 rounded p-1 gap-1">
                   {(['LOW', 'HIGH'] as const).map(q => (
                     <button
                       key={q}
                       onClick={() => setSettings({ ...settings, effectQuality: q })}
-                      className={`flex-1 py-1 text-xs font-bold rounded ${settings.effectQuality === q ? 'bg-purple-600 text-white' : 'text-gray-500 hover:text-gray-300'}`}
+                      className={`flex-1 py-1.5 text-xs font-bold rounded transition ${settings.effectQuality === q
+                        ? 'bg-gradient-to-b from-purple-500 to-purple-700 text-white shadow-[0_0_10px_rgba(168,85,247,0.5)]'
+                        : 'text-gray-500 hover:text-gray-300 hover:bg-white/5'}`}
                     >
                       {q}
                     </button>
@@ -303,85 +409,69 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Settings gear - only on menu / game-over (避免和游戏里左下摇杆区冲突) */}
+      {/* =============== 齿轮 (菜单界面可见) =============== */}
       {gameState !== GameState.PLAYING && (
         <button
           onClick={() => setShowSettings(true)}
-          className="absolute bottom-6 left-6 z-40 p-2 bg-black/40 border border-white/10 rounded hover:bg-white/10 text-gray-400 hover:text-white transition-colors"
+          className="absolute bottom-6 left-6 z-40 p-2 bg-black/40 border border-white/10 rounded-md hover:bg-white/10 transition-colors"
         >
-          <Settings size={24} />
+          <SettingsIcon size={22} />
         </button>
       )}
 
+      {/* =============== 游戏中 HUD =============== */}
       {gameState === GameState.PLAYING && (
         <>
-          {/* 顶部状态栏 */}
-          <div className="absolute top-0 left-0 w-full p-4 pointer-events-none flex justify-between items-start z-10">
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center gap-2 text-cyan-400 bg-black/60 p-2 rounded border border-cyan-900/50 backdrop-blur-md shadow-[0_0_15px_rgba(0,255,255,0.2)]">
-                <Trophy size={20} />
-                <span className="text-xl font-bold">{score.toString().padStart(6, '0')}</span>
+          <div className="absolute top-0 left-0 w-full p-3 pointer-events-none flex justify-between items-start z-10">
+            {/* 左上: 分数 */}
+            <div className="flex items-center gap-2 bg-[rgba(3,7,18,0.75)] backdrop-blur-md border border-cyan-900/60 px-3 py-2 rounded-md shadow-[0_0_16px_rgba(0,200,255,0.2)]">
+              <TrophyIcon size={20} active />
+              <div className="flex flex-col leading-none">
+                <span className="text-[9px] text-cyan-400/70 tracking-[0.25em]">SCORE</span>
+                <span className="text-lg font-bold text-cyan-100 font-mono">{score.toString().padStart(6, '0')}</span>
               </div>
             </div>
 
-            <div className="flex flex-col gap-2 w-64">
-              <div className="bg-black/60 p-2 rounded border border-red-900/50 backdrop-blur-md">
-                <div className="flex items-center justify-between mb-1 text-red-400">
-                  <div className="flex items-center gap-2">
-                    <Heart size={16} fill="currentColor" />
-                    <span className="text-sm">ARMOR</span>
-                  </div>
-                  <span className="text-xs">{Math.ceil(health)}%</span>
-                </div>
-                <div className="w-full h-2 bg-gray-900 rounded-full overflow-hidden border border-white/10">
-                  <div
-                    className={`h-full transition-all duration-300 ${health > 30 ? 'bg-gradient-to-r from-red-600 to-red-500' : 'bg-red-600 animate-pulse'}`}
-                    style={{ width: `${Math.max(0, health)}%` }}
-                  />
-                </div>
-              </div>
-              <div className="bg-black/60 p-2 rounded border border-blue-900/50 backdrop-blur-md">
-                <div className="flex items-center gap-2 mb-1 text-blue-400">
-                  <Activity size={16} />
-                  <span className="text-sm">ENERGY</span>
-                  <span className="ml-auto text-xs">{Math.floor(playerState?.mana || 0)}/{Math.floor(playerState?.maxMana || 100)}</span>
-                </div>
-                <div className="w-full h-2 bg-gray-900 rounded-full overflow-hidden border border-white/10">
-                  <div
-                    className="h-full bg-gradient-to-r from-blue-700 to-cyan-400 transition-all duration-100"
-                    style={{ width: `${Math.min(100, ((playerState?.mana || 0) / (playerState?.maxMana || 100)) * 100)}%` }}
-                  />
-                </div>
-              </div>
+            {/* 右上: 血量 + 能量 */}
+            <div className="flex flex-col gap-1.5 w-60">
+              <StatBar
+                label="ARMOR" icon={<ArmorIcon size={14} active />}
+                value={health} max={playerState?.maxHealth || 100}
+                color="#f87171" color2="#7f1d1d" criticalPulse
+              />
+              <StatBar
+                label="ENERGY" icon={<EnergyIcon size={14} active />}
+                value={playerState?.mana || 0} max={playerState?.maxMana || 100}
+                color="#60a5fa" color2="#1e3a8a"
+              />
             </div>
           </div>
 
-          {/* 虚拟摇杆 */}
           <Joystick />
 
-          {/* 左下提示：MOVE */}
-          <div className="absolute bottom-2 left-4 z-10 text-[10px] text-cyan-200/40 font-bold tracking-widest pointer-events-none">
+          {/* 操作提示条 */}
+          <div className="absolute bottom-1 left-4 z-10 text-[10px] text-cyan-200/40 font-bold tracking-widest pointer-events-none">
             LEFT HALF · MOVE
           </div>
-          {/* 右下提示：FIRE */}
-          <div className="absolute bottom-2 right-4 z-10 text-[10px] text-rose-200/40 font-bold tracking-widest pointer-events-none">
+          <div className="absolute bottom-1 right-4 z-10 text-[10px] text-rose-200/40 font-bold tracking-widest pointer-events-none">
             RIGHT HALF · FIRE
           </div>
 
-          {/* 技能按钮 */}
-          <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex gap-4 z-20">
-            <SkillButton index={1} icon={<Shield size={24} />} skillKey="shield" colorClass="text-blue-400 bg-blue-500" />
-            <SkillButton index={2} icon={<CircleDot size={24} />} skillKey="blackhole" colorClass="text-indigo-400 bg-indigo-500" />
-            <SkillButton index={3} icon={<Activity size={24} />} skillKey="shockwave" colorClass="text-yellow-400 bg-yellow-500" />
+          {/* 底部中央: 技能按钮 */}
+          <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex gap-3 z-20">
+            <SkillButton index={1} Icon={ShieldSkillIcon} label="SHIELD"    skillKey="shield"    hotkey="1" color="#60a5fa" />
+            <SkillButton index={2} Icon={BlackHoleIcon}   label="SINGULAR"  skillKey="blackhole" hotkey="2" color="#818cf8" />
+            <SkillButton index={3} Icon={ShockwaveIcon}   label="SHOCKWAVE" skillKey="shockwave" hotkey="3" color="#fbbf24" />
           </div>
 
-          {/* 换武器按钮 */}
-          <div className="absolute bottom-8 right-4 z-20">
+          {/* 底部右: 武器按钮 */}
+          <div className="absolute bottom-6 right-4 z-20">
             <WeaponButton />
           </div>
         </>
       )}
 
+      {/* =============== 练习场 =============== */}
       {gameState === GameState.PRACTICE && (
         <PracticeHUD
           gameRef={gameRef}
@@ -393,68 +483,71 @@ const App: React.FC = () => {
         />
       )}
 
+      {/* =============== 主菜单 =============== */}
       {gameState === GameState.MENU && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center z-10 bg-black/80 backdrop-blur-sm">
-          <div className="mb-12 text-center animate-pulse relative">
-            <div className="absolute -inset-10 bg-cyan-500/20 blur-3xl rounded-full opacity-20" />
-            <h1 className="text-5xl md:text-7xl font-bold bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-600 bg-clip-text text-transparent italic tracking-tighter drop-shadow-[0_0_10px_rgba(0,255,255,0.5)]">
+        <div className="absolute inset-0 flex flex-col items-center justify-center z-10 bg-black/70 backdrop-blur-sm">
+          {/* 标题 */}
+          <div className="mb-12 text-center relative">
+            <div className="absolute -inset-12 bg-cyan-500/20 blur-3xl rounded-full opacity-30 animate-pulse" />
+            <h1 className="text-5xl md:text-7xl font-black italic tracking-tighter"
+                style={{
+                  background: 'linear-gradient(90deg, #22d3ee, #60a5fa, #a78bfa)',
+                  WebkitBackgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                  filter: 'drop-shadow(0 0 12px rgba(0,255,255,0.5))'
+                }}>
               THUNDER STEALTH
             </h1>
-            <p className="text-cyan-200 mt-2 tracking-[0.3em] text-sm uppercase">Advanced Tactical Operations</p>
+            <p className="text-cyan-200/70 mt-2 tracking-[0.5em] text-xs uppercase">Advanced Tactical Operations</p>
           </div>
 
-          <div className="flex flex-col gap-6 w-72">
-            <button
-              onClick={handleStartGame}
-              className="group relative px-8 py-4 bg-cyan-950/40 hover:bg-cyan-800/60 border border-cyan-500/50 text-cyan-100 font-bold tracking-widest transition-all duration-200 clip-path-polygon hover:scale-105 active:scale-95 overflow-hidden"
-            >
-              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-cyan-400/10 to-transparent translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700" />
-              <span className="flex items-center justify-center gap-2 relative z-10">
-                <Rocket className="group-hover:translate-x-1 transition-transform text-cyan-400" />
-                ENGAGE
-              </span>
-            </button>
-
-            <button
-              onClick={handleStartPractice}
-              className="group relative px-8 py-4 bg-violet-950/40 hover:bg-violet-800/60 border border-violet-500/50 text-violet-100 font-bold tracking-widest transition-all duration-200 hover:scale-105 active:scale-95 overflow-hidden"
-            >
-              <span className="flex items-center justify-center gap-2 relative z-10">
-                <Target className="text-violet-300" />
-                PRACTICE RANGE
-              </span>
-            </button>
-
-            <div className="text-center text-xs text-gray-400 mt-4 space-y-1 font-sans border-t border-white/10 pt-4">
-              <p>📱 <span className="text-cyan-300">Mobile:</span> 左半屏拖动 = 移动 · 右半屏按住 = 开火</p>
-              <p className="hidden md:block">🖥️ <span className="text-cyan-300">Desktop:</span> WASD 移动 · 鼠标/空格 开火</p>
-              <p>技能：按屏幕右下方按钮 / 键盘 1 2 3</p>
-              <p className="text-violet-300/80">试验场: 无敌 · 魔法无限 · 任选武器 · 放置 Bot 练手感</p>
+          {/* 分数展示 (有记录时) */}
+          {highScore > 0 && (
+            <div className="mb-8 flex items-center gap-3 px-5 py-2 rounded-full bg-[rgba(10,20,40,0.6)] border border-yellow-500/40 shadow-[0_0_14px_rgba(250,204,21,0.2)]">
+              <TrophyIcon size={18} active />
+              <span className="text-[11px] tracking-widest text-yellow-200/80">BEST</span>
+              <span className="text-lg font-bold text-yellow-100 font-mono">{highScore.toString().padStart(6, '0')}</span>
             </div>
+          )}
+
+          {/* 主按钮 */}
+          <div className="flex flex-col gap-4 w-72">
+            <MenuButton onClick={handleStartGame} color="#22d3ee" icon={<RocketIcon size={22} active />} label="ENGAGE" primary />
+            <MenuButton onClick={handleStartPractice} color="#a78bfa" icon={<TargetIcon size={22} active />} label="PRACTICE RANGE" />
+          </div>
+
+          {/* 操作说明 */}
+          <div className="text-center text-[11px] text-gray-400 mt-10 space-y-1.5 max-w-sm font-sans">
+            <p>📱 <span className="text-cyan-300">Mobile:</span> 左半屏拖动 = 移动 · 右半屏按住 = 开火</p>
+            <p className="hidden md:block">🖥️ <span className="text-cyan-300">Desktop:</span> WASD 移动 · 鼠标/空格 开火 · Q 换武器</p>
+            <p><span className="text-cyan-300">Skills:</span> 按屏幕右下方按钮或键盘 1 / 2 / 3</p>
+            <p className="text-violet-300/80 pt-1 border-t border-white/5">试验场: 无敌 · 魔法无限 · 任选武器 · 放置 Bot 练手感</p>
           </div>
         </div>
       )}
 
+      {/* =============== Game Over =============== */}
       {gameState === GameState.GAME_OVER && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center z-10 bg-red-950/40 backdrop-blur-md">
-          <h2 className="text-7xl font-bold text-red-500 mb-2 drop-shadow-[0_0_15px_rgba(255,0,0,0.5)]">MIA</h2>
-          <p className="text-xl text-red-200 mb-10 tracking-widest">MISSION FAILED</p>
-          <div className="bg-black/80 p-8 rounded-xl border border-red-500/30 mb-8 text-center min-w-[280px] shadow-2xl">
-            <div className="text-gray-400 text-xs mb-2 uppercase tracking-widest">Operation Score</div>
-            <div className="text-5xl font-bold text-white mb-4 drop-shadow-[0_0_10px_rgba(255,255,255,0.3)]">{score}</div>
-            {score >= highScore && score > 0 && (
-              <div className="text-yellow-400 text-sm font-bold animate-bounce flex items-center justify-center gap-2">
-                <Trophy size={14} /> NEW RECORD
-              </div>
-            )}
+        <div className="absolute inset-0 flex flex-col items-center justify-center z-10 bg-gradient-to-b from-red-950/40 via-black/70 to-red-950/50 backdrop-blur-md">
+          <h2 className="text-7xl md:text-8xl font-black italic text-transparent bg-clip-text bg-gradient-to-br from-red-300 via-red-500 to-red-700 drop-shadow-[0_0_18px_rgba(239,68,68,0.5)]">
+            MIA
+          </h2>
+          <p className="text-xl text-red-200/80 mb-8 tracking-[0.4em]">MISSION FAILED</p>
+
+          <div className="relative mb-8 min-w-[320px]">
+            <div className="absolute inset-0 bg-gradient-to-br from-red-900/10 to-black/90 rounded-xl border-2 border-red-500/40 shadow-[0_0_40px_rgba(239,68,68,0.3)]" />
+            <div className="relative p-7 text-center">
+              <div className="text-gray-400 text-[10px] mb-1 uppercase tracking-[0.3em]">OPERATION SCORE</div>
+              <div className="text-5xl font-black text-white font-mono mb-3 drop-shadow-[0_0_12px_rgba(255,255,255,0.3)]">{score}</div>
+              {score >= highScore && score > 0 && (
+                <div className="text-yellow-300 text-sm font-bold animate-bounce flex items-center justify-center gap-2 tracking-widest">
+                  <TrophyIcon size={16} active /> NEW RECORD
+                </div>
+              )}
+            </div>
           </div>
-          <button
-            onClick={handleStartGame}
-            className="px-8 py-3 bg-white text-black font-bold hover:bg-cyan-400 hover:scale-105 transition-all flex items-center gap-2 shadow-[0_0_20px_rgba(255,255,255,0.3)]"
-          >
-            <Crosshair size={20} />
-            REDEPLOY
-          </button>
+
+          <MenuButton onClick={handleStartGame} color="#22d3ee" icon={<CrosshairIcon size={20} active />} label="REDEPLOY" primary compact />
         </div>
       )}
     </div>
@@ -463,12 +556,73 @@ const App: React.FC = () => {
 
 export default App;
 
-// ============== 练习场 HUD ==============
+// =====================================================================
+// 菜单按钮 (削角矩形, 扫光动画, 自绘图标)
+// =====================================================================
+const MenuButton: React.FC<{
+  onClick: () => void;
+  color: string;
+  icon: React.ReactNode;
+  label: string;
+  primary?: boolean;
+  compact?: boolean;
+}> = ({ onClick, color, icon, label, primary, compact }) => (
+  <button
+    onClick={onClick}
+    className={`group relative overflow-hidden ${compact ? 'px-7 py-3' : 'px-8 py-4'} transition-all active:scale-95 hover:scale-105`}
+    style={{
+      background: `linear-gradient(135deg, rgba(10,20,40,0.9), rgba(3,7,18,0.9))`,
+      border: `1.5px solid ${color}aa`,
+      boxShadow: primary ? `0 0 22px ${color}44` : `0 0 12px ${color}33`,
+      clipPath: 'polygon(10px 0, 100% 0, calc(100% - 10px) 100%, 0 100%)'
+    }}
+  >
+    {/* 扫光 */}
+    <div
+      className="absolute inset-0 pointer-events-none"
+      style={{
+        background: `linear-gradient(90deg, transparent, ${color}22, transparent)`,
+        transform: 'translateX(-100%)',
+        animation: 'shine 2.8s infinite'
+      }}
+    />
+    <span className="flex items-center justify-center gap-3 relative z-10 font-bold tracking-[0.25em]"
+          style={{ color, textShadow: `0 0 6px ${color}80` }}>
+      {icon}
+      {label}
+    </span>
+    <style>{`@keyframes shine { 0% { transform: translateX(-100%); } 60%, 100% { transform: translateX(200%); } }`}</style>
+  </button>
+);
+
+// =====================================================================
+// 练习场 HUD
+// =====================================================================
 type UseUIBtnPropsFn = (
   gameRef: React.RefObject<GameRef>,
   onPress: () => void,
   opts?: { disabled?: boolean }
 ) => any;
+
+const BOT_CONFIGS: Array<{ kind: BotKind; label: string; color: string }> = [
+  { kind: BotKind.BASIC,        label: 'BASIC',    color: '#94a3b8' },
+  { kind: BotKind.FAST,         label: 'FAST',     color: '#22d3ee' },
+  { kind: BotKind.TANK,         label: 'TANK',     color: '#f59e0b' },
+  { kind: BotKind.KAMIKAZE,     label: 'KAMI',     color: '#f43f5e' },
+  { kind: BotKind.SHIELDER,     label: 'SHIELD',   color: '#0ea5e9' },
+  { kind: BotKind.SNIPER,       label: 'SNIPER',   color: '#22c55e' },
+  { kind: BotKind.SWARMER,      label: 'SWARM×5',  color: '#facc15' },
+  { kind: BotKind.BOSS,         label: 'BOSS',     color: '#d946ef' },
+  { kind: BotKind.BOSS_CARRIER, label: 'CARRIER',  color: '#ec4899' },
+  { kind: BotKind.BOSS_REAVER,  label: 'REAVER',   color: '#ef4444' },
+  { kind: BotKind.STATIC,       label: 'STATIC',   color: '#10b981' }
+];
+
+const WEAPON_ORDER_UI: WeaponType[] = [
+  WeaponType.VULCAN, WeaponType.SPREAD, WeaponType.LASER,
+  WeaponType.RAILGUN, WeaponType.PLASMA, WeaponType.TESLA,
+  WeaponType.BOMB, WeaponType.FLAK, WeaponType.HELIX
+];
 
 const PracticeHUD: React.FC<{
   gameRef: React.RefObject<GameRef>;
@@ -477,139 +631,162 @@ const PracticeHUD: React.FC<{
   currentWeapon: WeaponType;
   onExit: () => void;
   useUIButtonProps: UseUIBtnPropsFn;
-}> = ({ gameRef, playerState, joystick, currentWeapon, onExit, useUIButtonProps }) => {
+}> = ({ gameRef, joystick, currentWeapon, onExit, useUIButtonProps }) => {
 
-  // Bot 生成按钮
-  const BotButton: React.FC<{ kind: BotKind; label: string; color: string; }> = ({ kind, label, color }) => {
+  const BotButton: React.FC<{ kind: BotKind; label: string; color: string }> = ({ kind, label, color }) => {
     const btnProps = useUIButtonProps(gameRef, () => gameRef.current?.spawnPracticeBot(kind));
     return (
       <button
         {...btnProps}
         data-ui-button="practice-bot"
-        style={{ touchAction: 'none' }}
-        className={`px-3 py-2 rounded border text-[11px] font-bold tracking-wider backdrop-blur-md active:scale-95 transition ${color}`}
+        style={{
+          touchAction: 'none',
+          borderColor: color + 'aa',
+          background: `linear-gradient(135deg, ${color}22, rgba(0,0,0,0.6))`,
+          color
+        }}
+        className="px-2.5 py-1.5 rounded text-[10px] font-black tracking-widest border backdrop-blur-md active:scale-95 transition hover:brightness-125"
       >
         {label}
       </button>
     );
   };
 
-  // 武器选择按钮 (直接跳到某武器, 不是循环切换)
-  const WeapChip: React.FC<{ w: WeaponType; label: string; active: boolean }> = ({ w, label, active }) => {
+  const WeapChip: React.FC<{ w: WeaponType; active: boolean }> = ({ w, active }) => {
+    const meta = WEAPON_META[w];
     const btnProps = useUIButtonProps(gameRef, () => gameRef.current?.selectWeapon(w));
     return (
       <button
         {...btnProps}
         data-ui-button="practice-weap"
         style={{ touchAction: 'none' }}
-        className={`px-2.5 py-1.5 rounded text-[10px] font-bold tracking-wider backdrop-blur-md border active:scale-95 transition ${
+        className={`flex items-center gap-1.5 px-2 py-1.5 rounded text-[10px] font-bold tracking-widest backdrop-blur-md border active:scale-95 transition ${
           active
-            ? 'bg-violet-600/60 border-violet-300 text-white'
-            : 'bg-black/60 border-white/10 text-gray-300 hover:bg-white/10'
+            ? 'border-white/60 shadow-[0_0_14px_rgba(255,255,255,0.3)]'
+            : 'border-white/10 hover:border-white/30'
         }`}
+        title={meta.label}
       >
-        {label}
+        <meta.Icon size={18} active={active} />
+        <span style={{ color: active ? '#fff' : meta.color }}>{meta.label}</span>
       </button>
     );
   };
 
-  const clearProps  = useUIButtonProps(gameRef, () => gameRef.current?.clearPracticeBots());
-  const exitProps   = useUIButtonProps(gameRef, onExit);
+  const clearProps = useUIButtonProps(gameRef, () => gameRef.current?.clearPracticeBots());
+  const exitProps  = useUIButtonProps(gameRef, onExit);
 
-  // 技能按钮 (复用视觉但冷却永远是0)
-  const SkillBtn: React.FC<{ index: number; icon: React.ReactNode; color: string; }> = ({ index, icon, color }) => {
+  const SkillBtn: React.FC<{ index: number; Icon: React.FC<{ size?: number; active?: boolean }>; hotkey: string; color: string }> = ({ index, Icon, hotkey, color }) => {
     const btnProps = useUIButtonProps(gameRef, () => gameRef.current?.triggerSkill(index));
     return (
       <button
         {...btnProps}
         data-ui-button="skill"
-        className="relative flex flex-col items-center justify-center w-16 h-16 rounded overflow-hidden transition-all active:scale-95 border"
+        className="relative flex items-center justify-center w-[68px] h-[68px] rounded-full transition-transform active:scale-90"
         style={{
-          backgroundColor: 'rgba(10, 20, 40, 0.8)',
-          borderColor: 'rgba(255,255,255,0.4)',
-          borderWidth: '1px',
+          background: `radial-gradient(circle at 30% 30%, rgba(20,30,60,0.95), rgba(0,0,0,0.85))`,
+          boxShadow: `0 0 14px ${color}40, inset 0 0 6px ${color}30`,
+          border: `2px solid ${color}`,
           touchAction: 'none'
         }}
       >
-        <div className={color}>{icon}</div>
-        <span className="text-[10px] mt-1 font-bold text-white">{index}</span>
+        <Icon size={30} active />
+        <span
+          className="absolute -top-1 -right-1 w-5 h-5 rounded-full text-[10px] font-black flex items-center justify-center"
+          style={{
+            background: `linear-gradient(135deg, ${color}, rgba(0,0,0,0.9))`,
+            color: '#fff',
+            border: `1px solid ${color}`
+          }}
+        >
+          {hotkey}
+        </span>
       </button>
     );
   };
 
-  // 换武器按钮
   const WeapCycleBtn: React.FC = () => {
     const btnProps = useUIButtonProps(gameRef, () => gameRef.current?.switchWeapon());
+    const meta = WEAPON_META[currentWeapon];
     return (
       <button
         {...btnProps}
         data-ui-button="weapon"
         style={{ touchAction: 'none' }}
-        className="flex flex-col items-center justify-center w-24 h-24 bg-black/60 border-2 border-violet-400/50 rounded-lg backdrop-blur-md active:scale-95 transition"
+        className="relative w-28 h-28"
       >
-        <WeaponIcon w={currentWeapon} />
-        <span className="text-[10px] text-violet-100 font-bold tracking-widest mt-1">{weaponName(currentWeapon)}</span>
+        <svg viewBox="0 0 100 100" className="absolute inset-0 w-full h-full drop-shadow-[0_0_12px_rgba(192,132,252,0.25)]">
+          <polygon
+            points="50,4 92,27 92,73 50,96 8,73 8,27"
+            fill="rgba(10,20,40,0.95)"
+            stroke={meta.color}
+            strokeWidth="2.2"
+          />
+          <polygon
+            points="50,10 86,30 86,70 50,90 14,70 14,30"
+            fill="none"
+            stroke={meta.color}
+            strokeWidth="1"
+            opacity="0.4"
+          />
+        </svg>
+        <div className="relative z-10 flex flex-col items-center justify-center h-full">
+          <meta.Icon size={36} active />
+          <span className="text-[9px] font-bold tracking-[0.15em] mt-1" style={{ color: meta.color }}>
+            {meta.label}
+          </span>
+        </div>
       </button>
     );
   };
 
   return (
     <>
-      {/* 顶部工具栏 */}
       <div className="absolute top-0 left-0 w-full p-3 z-20 flex flex-col gap-2 pointer-events-none">
+        {/* 顶栏 */}
         <div className="flex items-center justify-between gap-2 pointer-events-auto">
-          <div className="flex items-center gap-2 text-violet-300 bg-black/70 px-3 py-1.5 rounded border border-violet-500/40 backdrop-blur-md">
-            <Target size={16} />
-            <span className="text-[11px] font-bold tracking-[0.2em]">PRACTICE RANGE</span>
+          <div className="flex items-center gap-2 text-violet-300 bg-[rgba(3,7,18,0.8)] px-3 py-1.5 rounded border border-violet-500/40 backdrop-blur-md shadow-[0_0_12px_rgba(192,132,252,0.25)]">
+            <TargetIcon size={16} active />
+            <span className="text-[11px] font-black tracking-[0.3em]">PRACTICE RANGE</span>
           </div>
           <button
             {...exitProps}
             data-ui-button="practice-exit"
             style={{ touchAction: 'none' }}
-            className="flex items-center gap-1 px-3 py-1.5 rounded border border-red-500/50 bg-red-950/40 hover:bg-red-900/60 text-red-100 text-[11px] font-bold tracking-wider active:scale-95 transition"
+            className="flex items-center gap-1 px-3 py-1.5 rounded border border-red-500/50 bg-[rgba(60,10,10,0.6)] hover:bg-red-900/60 text-red-100 text-[11px] font-bold tracking-wider active:scale-95 transition"
           >
-            <LogOut size={14} />
+            <ExitIcon size={16} />
             EXIT
           </button>
         </div>
 
-        {/* Bot 生成区 */}
-        <div className="pointer-events-auto bg-black/60 border border-white/10 rounded p-2 backdrop-blur-md">
-          <div className="text-[10px] text-gray-400 mb-1.5 tracking-widest flex items-center gap-1"><Swords size={11}/> SPAWN BOTS</div>
+        {/* Spawn Bots */}
+        <div className="pointer-events-auto bg-[rgba(3,7,18,0.75)] border border-white/10 rounded p-2 backdrop-blur-md">
+          <div className="text-[10px] text-gray-400 mb-1.5 tracking-widest flex items-center gap-1">
+            <SwordsIcon size={12} /> SPAWN BOTS
+          </div>
           <div className="flex flex-wrap gap-1.5">
-            <BotButton kind={BotKind.BASIC}        label="BASIC"    color="bg-slate-800/70 border-slate-500 text-slate-100 hover:bg-slate-700" />
-            <BotButton kind={BotKind.FAST}         label="FAST"     color="bg-cyan-950/70 border-cyan-500 text-cyan-100 hover:bg-cyan-900" />
-            <BotButton kind={BotKind.TANK}         label="TANK"     color="bg-amber-950/70 border-amber-500 text-amber-100 hover:bg-amber-900" />
-            <BotButton kind={BotKind.KAMIKAZE}     label="KAMIKAZE" color="bg-rose-950/70 border-rose-500 text-rose-100 hover:bg-rose-900" />
-            <BotButton kind={BotKind.SHIELDER}     label="SHIELDER" color="bg-sky-950/70 border-sky-500 text-sky-100 hover:bg-sky-900" />
-            <BotButton kind={BotKind.SNIPER}       label="SNIPER"   color="bg-green-950/70 border-green-500 text-green-100 hover:bg-green-900" />
-            <BotButton kind={BotKind.SWARMER}      label="SWARMER×5" color="bg-yellow-950/70 border-yellow-500 text-yellow-100 hover:bg-yellow-900" />
-            <BotButton kind={BotKind.BOSS}         label="BOSS"     color="bg-fuchsia-950/70 border-fuchsia-500 text-fuchsia-100 hover:bg-fuchsia-900" />
-            <BotButton kind={BotKind.BOSS_CARRIER} label="CARRIER"  color="bg-pink-950/70 border-pink-500 text-pink-100 hover:bg-pink-900" />
-            <BotButton kind={BotKind.BOSS_REAVER}  label="REAVER"   color="bg-red-950/70 border-red-500 text-red-100 hover:bg-red-900" />
-            <BotButton kind={BotKind.STATIC}       label="STATIC"   color="bg-emerald-950/70 border-emerald-500 text-emerald-100 hover:bg-emerald-900" />
+            {BOT_CONFIGS.map(b => (
+              <BotButton key={b.kind} kind={b.kind} label={b.label} color={b.color} />
+            ))}
             <button
               {...clearProps}
               data-ui-button="practice-clear"
               style={{ touchAction: 'none' }}
-              className="px-3 py-2 rounded border text-[11px] font-bold tracking-wider backdrop-blur-md active:scale-95 transition bg-red-950/60 border-red-500 text-red-100 hover:bg-red-900 ml-auto flex items-center gap-1"
+              className="ml-auto flex items-center gap-1 px-2.5 py-1.5 rounded border text-[10px] font-bold tracking-widest border-red-500 bg-gradient-to-br from-red-950/80 to-red-900/60 text-red-100 hover:brightness-125 active:scale-95 transition"
             >
-              <Trash2 size={12} /> CLEAR
+              <TrashIcon size={12} /> CLEAR
             </button>
           </div>
         </div>
 
-        {/* 武器选择区 */}
-        <div className="pointer-events-auto bg-black/60 border border-white/10 rounded p-2 backdrop-blur-md">
+        {/* Weapons */}
+        <div className="pointer-events-auto bg-[rgba(3,7,18,0.75)] border border-white/10 rounded p-2 backdrop-blur-md">
           <div className="text-[10px] text-gray-400 mb-1.5 tracking-widest">WEAPONS</div>
           <div className="flex flex-wrap gap-1.5">
-            <WeapChip w={WeaponType.VULCAN}  label="VULCAN"   active={currentWeapon === WeaponType.VULCAN} />
-            <WeapChip w={WeaponType.SPREAD}  label="SPREAD"   active={currentWeapon === WeaponType.SPREAD} />
-            <WeapChip w={WeaponType.LASER}   label="LASER"    active={currentWeapon === WeaponType.LASER} />
-            <WeapChip w={WeaponType.RAILGUN} label="RAILGUN"  active={currentWeapon === WeaponType.RAILGUN} />
-            <WeapChip w={WeaponType.PLASMA}  label="MISSILE"  active={currentWeapon === WeaponType.PLASMA} />
-            <WeapChip w={WeaponType.TESLA}   label="TESLA"    active={currentWeapon === WeaponType.TESLA} />
-            <WeapChip w={WeaponType.BOMB}    label="BOMB"     active={currentWeapon === WeaponType.BOMB} />
+            {WEAPON_ORDER_UI.map(w => (
+              <WeapChip key={w} w={w} active={currentWeapon === w} />
+            ))}
           </div>
         </div>
       </div>
@@ -617,63 +794,25 @@ const PracticeHUD: React.FC<{
       {/* 摇杆 */}
       {joystick.active && (
         <>
-          <div
-            className="pointer-events-none absolute rounded-full border-2 border-cyan-300/60 bg-cyan-400/10"
-            style={{ width: 140, height: 140, left: joystick.base.x - 70, top: joystick.base.y - 70 }}
-          />
-          <div
-            className="pointer-events-none absolute rounded-full bg-cyan-300/70 border border-white/80 shadow-[0_0_18px_rgba(0,255,255,0.6)]"
-            style={{ width: 56, height: 56, left: joystick.knob.x - 28, top: joystick.knob.y - 28 }}
-          />
+          <div className="pointer-events-none absolute rounded-full border-2 border-cyan-300/60 bg-cyan-400/10"
+               style={{ width: 140, height: 140, left: joystick.base.x - 70, top: joystick.base.y - 70 }} />
+          <div className="pointer-events-none absolute rounded-full bg-cyan-300/70 border border-white/80 shadow-[0_0_18px_rgba(0,255,255,0.6)]"
+               style={{ width: 56, height: 56, left: joystick.knob.x - 28, top: joystick.knob.y - 28 }} />
         </>
       )}
 
-      {/* 操作提示 */}
-      <div className="absolute bottom-2 left-4 z-10 text-[10px] text-cyan-200/40 font-bold tracking-widest pointer-events-none">
-        LEFT HALF · MOVE
-      </div>
-      <div className="absolute bottom-2 right-4 z-10 text-[10px] text-rose-200/40 font-bold tracking-widest pointer-events-none">
-        RIGHT HALF · FIRE
+      <div className="absolute bottom-1 left-4 z-10 text-[10px] text-cyan-200/40 font-bold tracking-widest pointer-events-none">LEFT HALF · MOVE</div>
+      <div className="absolute bottom-1 right-4 z-10 text-[10px] text-rose-200/40 font-bold tracking-widest pointer-events-none">RIGHT HALF · FIRE</div>
+
+      <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex gap-3 z-20">
+        <SkillBtn index={1} Icon={ShieldSkillIcon} hotkey="1" color="#60a5fa" />
+        <SkillBtn index={2} Icon={BlackHoleIcon}   hotkey="2" color="#818cf8" />
+        <SkillBtn index={3} Icon={ShockwaveIcon}   hotkey="3" color="#fbbf24" />
       </div>
 
-      {/* 技能 */}
-      <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex gap-4 z-20">
-        <SkillBtn index={1} icon={<Shield size={24} />}    color="text-blue-400" />
-        <SkillBtn index={2} icon={<CircleDot size={24} />} color="text-indigo-400" />
-        <SkillBtn index={3} icon={<Activity size={24} />}  color="text-yellow-400" />
-      </div>
-
-      {/* 换武器 */}
-      <div className="absolute bottom-8 right-4 z-20">
+      <div className="absolute bottom-6 right-4 z-20">
         <WeapCycleBtn />
       </div>
     </>
   );
 };
-
-// 武器图标/名字小工具 (和 App 里一致, 这里独立一份方便 PracticeHUD 使用)
-const WeaponIcon: React.FC<{ w: WeaponType }> = ({ w }) => {
-  switch (w) {
-    case WeaponType.LASER:   return <Zap size={24} className="text-cyan-400" />;
-    case WeaponType.PLASMA:  return <Disc size={24} className="text-fuchsia-400" />;
-    case WeaponType.TESLA:   return <Activity size={24} className="text-blue-200" />;
-    case WeaponType.BOMB:    return <Bomb size={24} className="text-red-400" />;
-    case WeaponType.RAILGUN: return <Scope size={24} className="text-violet-300" />;
-    case WeaponType.SPREAD:  return <Waves size={24} className="text-orange-400" />;
-    case WeaponType.VULCAN:
-    default:                 return <Hexagon size={24} className="text-yellow-400" />;
-  }
-};
-
-function weaponName(w: WeaponType) {
-  switch (w) {
-    case WeaponType.LASER:   return "HYPER BEAM";
-    case WeaponType.PLASMA:  return "TRACKING MSL";
-    case WeaponType.TESLA:   return "TESLA COIL";
-    case WeaponType.BOMB:    return "DOOM BOMB";
-    case WeaponType.RAILGUN: return "RAILGUN";
-    case WeaponType.SPREAD:  return "SCATTER GUN";
-    case WeaponType.VULCAN:  return "VULCAN CANNON";
-    default:                 return "";
-  }
-}
