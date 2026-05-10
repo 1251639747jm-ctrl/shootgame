@@ -62,6 +62,10 @@ export class Player extends Entity {
     chargeRate: number = 80; // per second
     isCharging: boolean = false;
 
+    // 激光冷却: 蓄满射出一发后, 3 秒内不能再次蓄力
+    laserCooldown: number = 0;
+    laserCooldownMax: number = 3; // seconds
+
     shieldActive: boolean = false; // used by PlayerModel
     invincible: boolean = false;   // 练习场无敌
     unlimitedMana: boolean = false;// 练习场魔法无限
@@ -99,6 +103,11 @@ export class Player extends Entity {
 
         // mana regen
         this.mana = Math.min(this.maxMana, this.mana + this.manaRegen * dt);
+
+        // 激光冷却
+        if (this.laserCooldown > 0) {
+            this.laserCooldown = Math.max(0, this.laserCooldown - dt);
+        }
 
         // skill cooldowns
         const skills: ('shield' | 'blackhole' | 'shockwave')[] = ['shield', 'blackhole', 'shockwave'];
