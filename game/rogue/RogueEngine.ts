@@ -220,10 +220,26 @@ export class RogueEngine {
         // ========== 实体更新 ==========
         const enemies = this.entities.filter(e => e instanceof Enemy && !e.markedForDeletion) as Enemy[];
         const playerPos = this.player.position;
+
+        // 法阵束缚 (CIRCLE_SLOW perk): 法阵范围内的小怪按减速 dt 推进
+        const slowFactor = this.state.modifiers.circleSlowFactor;
+        const slowCirclePos = this.magicCircle ? this.magicCircle.position : null;
+        const slowCircleR2 = this.magicCircle
+            ? this.magicCircle.effectRadius * this.magicCircle.effectRadius
+            : 0;
+
         this.entities.forEach(entity => {
             if (entity instanceof Missile) entity.update(dt, enemies);
             else if (entity instanceof Laser) entity.update(dt, enemies);
-            else entity.update(dt, playerPos);
+            else if (entity instanceof Enemy && slowFactor > 0 && slowCirclePos && !entity.isBoss) {
+                // 小怪在法阵内使用减速 dt (Boss 不减速, 保持战斗张力)
+                const dx = entity.position.x - slowCirclePos.x;
+                const dy = entity.position.y - slowCirclePos.y;
+                const inCircle = dx * dx + dy * dy <= slowCircleR2;
+                entity.update(inCircle ? dt * (1 - slowFactor) : dt, playerPos);
+            } else {
+                entity.update(dt, playerPos);
+            }
         });
 
         // ========== 敌人开火 (在 Enemy.update 之后, fireTimer 已被扣减) ==========
@@ -358,6 +374,14 @@ export class RogueEngine {
                 else if (e instanceof Explosion) Explosion.draw(this.ctx, e);
                 else if (e instanceof TeslaLightning) TeslaLightning.draw(this.ctx, e);
             });
+
+            // 肉鸽激光: 把 "蓄力光球" 覆盖 UI 画到机头, 给玩家明确的蓄力反馈
+            if (this.player &&
+                this.state.starterWeapon === 'LASER' &&
+                !this.player.markedForDeletion &&
+                this.state.phase === RoguePhase.FIGHTING) {
+                Laser.drawChargingOverlay(this.ctx, this.player);
+            }
         }
 
         // HUD (战斗中才画)
