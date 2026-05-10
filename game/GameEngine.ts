@@ -376,7 +376,11 @@ export class GameEngine {
 
       // Weapon Logic
       if (this.player.currentWeapon === WeaponType.LASER) {
-          if (isFiring) {
+          // 冷却中, 彻底锁定: 不蓄力、不发射
+          if (this.player.laserCooldown > 0) {
+              this.player.isCharging = false;
+              this.player.chargeLevel = 0;
+          } else if (isFiring && !existingBeam) {
               this.player.isCharging = true;
               this.player.chargeLevel = Math.min(100, this.player.chargeLevel + this.player.chargeRate * dt);
 
@@ -386,12 +390,13 @@ export class GameEngine {
                   this.entities.push(new ChargeParticle(this.player));
               }
 
-              // 充满即发射，不需要放手
-              if (this.player.chargeLevel >= 100 && !existingBeam) {
+              // 蓄满 -> 只发射一发, 随后进入 3s 冷却
+              if (this.player.chargeLevel >= 100) {
                   this.entities.push(new Laser(this.player));
-                  this.addShake(8, 0.3);
+                  this.addShake(10, 0.35);
                   this.player.chargeLevel = 0;
                   this.player.isCharging = false;
+                  this.player.laserCooldown = this.player.laserCooldownMax;
               }
           } else {
               this.player.isCharging = false;
@@ -560,6 +565,9 @@ export class GameEngine {
 
       // Pass enemies list for Missile tracking
       if (entity instanceof Missile) {
+          entity.update(dt, enemies);
+      } else if (entity instanceof Laser) {
+          // 激光需要敌人列表做拐弯寻敌
           entity.update(dt, enemies);
       } else {
           entity.update(dt, targetPos);
@@ -968,28 +976,41 @@ export class GameEngine {
         
         let collision = false;
         
-        // LASER COLLISION
+        // LASER COLLISION (曲率折线)
         const isLaserA = (a instanceof Laser);
         const isLaserB = (b instanceof Laser);
         
         if (isLaserA || isLaserB) {
-            const laser = isLaserA ? a : b as Laser;
+            const laser = (isLaserA ? a : b) as Laser;
             const target = isLaserA ? b : a;
-            
-            const relX = Math.abs(target.position.x - laser.position.x);
-            const relY = laser.position.y - target.position.y; // Positive if above
-            
-            if (relX < (laser.width || laser.radius) + target.radius && relY > 0 && relY < laser.length) {
-                collision = true;
-                if (target instanceof Enemy) {
-                    const dmg = laser.damage || 10;
+
+            // 仅对敌人生效, 其它实体不跟激光碰撞
+            if (target instanceof Enemy && laser.damage > 0 && laser.path && laser.path.length >= 2) {
+                const d2 = Laser.pointDistanceSqToPath(target.position.x, target.position.y, laser.path);
+                const r = laser.hitRadius + target.radius;
+                if (d2 <= r * r) {
+                    const dmg = laser.damage;
                     target.applyDamage(dmg);
-                    this.createExplosion(target.position.x + (Math.random()-0.5)*20, target.position.y, '#0ff', 1);
-                    this.spawnFloatingText(Math.ceil(dmg).toString(), '#0ff', {x: target.position.x + (Math.random()-0.5)*20, y: target.position.y});
+                    // 视觉: 光束打击点处小爆光
+                    if (Math.random() < 0.4) {
+                        this.createExplosion(
+                            target.position.x + (Math.random() - 0.5) * 20,
+                            target.position.y + (Math.random() - 0.5) * 20,
+                            '#7ef1ff', 1
+                        );
+                    }
+                    // 伤害数字节流, 避免每帧飘字噪声
+                    if (Math.random() < 0.25) {
+                        this.spawnFloatingText(
+                            Math.ceil(dmg * 60).toString(), // 近似 DPS 感观
+                            '#7ef1ff',
+                            { x: target.position.x, y: target.position.y }
+                        );
+                    }
                     if (target.health <= 0) this.killEnemy(target);
-                    continue;
                 }
             }
+            continue; // 激光自己不触发通用碰撞
         } else if (a instanceof Missile || b instanceof Missile) {
             const missile = (a instanceof Missile) ? a : b as unknown as Missile;
             const target = (a instanceof Missile) ? b : a;
@@ -1112,10 +1133,10 @@ export class GameEngine {
       else if (e instanceof ChargeParticle) this.renderer.drawChargeParticle(e);
     });
 
-    // 激光充能视觉 (在玩家头顶)
+    // 激光充能/冷却视觉 (在玩家枪口上)
     if (this.player && !this.player.markedForDeletion &&
         this.player.currentWeapon === WeaponType.LASER &&
-        this.player.chargeLevel > 0) {
+        (this.player.chargeLevel > 0 || this.player.laserCooldown > 0)) {
         Laser.drawChargingOverlay(this.ctx, this.player);
     }
     
