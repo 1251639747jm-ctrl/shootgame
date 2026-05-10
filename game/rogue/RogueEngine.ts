@@ -441,6 +441,9 @@ export class RogueEngine {
         // 魔法阵
         if (this.state.starterWeapon === 'MAGIC_CIRCLE' && this.state.circleElement) {
             this.magicCircle = new MagicCircle(this.player, this.state.circleElement, this.state.modifiers);
+            // 通用 FIRE_RATE_UP 也加速 tick (法阵武器的"射速"就是 tick 间隔)
+            // MagicCircle 内部已经用 circleTickMul, 这里再除一道 fireRateMultiplier
+            this.magicCircle.tickInterval /= this.state.modifiers.fireRateMultiplier;
         } else {
             this.magicCircle = null;
         }
@@ -580,17 +583,30 @@ export class RogueEngine {
         this.player.damageMultiplier = m.damageMultiplier;
 
         // 肉鸽模式激光: 去掉冷却 (连续蓄射, 不再是慢充单发)
+        //   - laserCdReduction (原"冷却-1s") 现在通过加速蓄力提供"冷却下降"语义
+        //   - FIRE_RATE_UP 通用射速也叠加到蓄力速度上, 让激光也能从射速 perk 获益
+        //   - LASER_DPS_UP / LASER_WIDTH_UP 作为字段挂到 player, Laser.update 会读
         if (this.state.starterWeapon === 'LASER') {
             this.player.laserCooldownMax = 0;
             this.player.laserCooldown = 0;
-            // 蓄力速度随 modifiers 缩放 (laserCdReduction 提供加成)
-            this.player.chargeRate = 80 + 25 * m.laserCdReduction;
+            const laserChargeBonus = 25 * m.laserCdReduction;
+            this.player.chargeRate = (80 + laserChargeBonus) * m.fireRateMultiplier;
+            this.player.laserDpsMul = m.laserDpsMul;
+            this.player.laserWidthMul = m.laserWidthMul;
+        } else {
+            // 非激光武器时保持默认, 避免切换场景后遗留
+            this.player.laserDpsMul = 1;
+            this.player.laserWidthMul = 1;
         }
 
-        // 射速 (机枪)
+        // 射速 (机枪): 毫秒间隔 = 90 / 倍率
         if (this.state.starterWeapon === 'VULCAN') {
             this.player.fireRate = Math.max(30, 90 / m.fireRateMultiplier);
         }
+
+        // 魔法阵: FIRE_RATE_UP 也应用到法阵 tick 间隔上
+        // MagicCircle 在 startLayer 里会用当前 modifiers 新建, 所以这里不用手动改
+        // (下面我们会在 startLayer 构造 MagicCircle 之后, 把 fireRateMultiplier 作用到 tickInterval 上)
     }
 
     // ================== 武器开火 ==================
@@ -604,12 +620,35 @@ export class RogueEngine {
                 this.player.lastShotTime = now;
                 const wx = this.player.position.x;
                 const wy = this.player.position.y;
-                this.entities.push(new Bullet(wx, wy, true, WeaponType.VULCAN, -0.05, 0, this.player));
-                this.entities.push(new Bullet(wx, wy, true, WeaponType.VULCAN, 0.05, 0, this.player));
-                const extra = this.state.modifiers.spreadBonus;
+                const m = this.state.modifiers;
+
+                // 辅助: 把机枪升级标签贴到每颗子弹上, 这样 checkCollisions
+                // 就能区分普通子弹 vs 穿透 / 弹射 / 爆裂子弹.
+                const tagVulcan = (b: Bullet) => {
+                    if (m.vulcanPierce > 0) {
+                        b.piercing = true;
+                        b.pierceLeft = m.vulcanPierce;
+                    }
+                    if (m.vulcanBounce > 0) {
+                        b.bouncesLeft = m.vulcanBounce;
+                    }
+                    if (m.vulcanExplosive) {
+                        b.explosive = true;
+                    }
+                };
+
+                const b1 = new Bullet(wx, wy, true, WeaponType.VULCAN, -0.05, 0, this.player);
+                const b2 = new Bullet(wx, wy, true, WeaponType.VULCAN,  0.05, 0, this.player);
+                tagVulcan(b1);
+                tagVulcan(b2);
+                this.entities.push(b1, b2);
+
+                const extra = m.spreadBonus;
                 for (let i = 0; i < extra; i++) {
                     const off = (i + 1) * 0.12 * (i % 2 === 0 ? 1 : -1);
-                    this.entities.push(new Bullet(wx, wy, true, WeaponType.VULCAN, off, 0, this.player));
+                    const b = new Bullet(wx, wy, true, WeaponType.VULCAN, off, 0, this.player);
+                    tagVulcan(b);
+                    this.entities.push(b);
                 }
             }
         } else if (this.state.starterWeapon === 'LASER') {
@@ -774,6 +813,9 @@ export class RogueEngine {
                     const dy = a.position.y - b.position.y;
                     const dist = Math.sqrt(dx * dx + dy * dy);
                     if (dist < bullet.radius + enemy.radius) {
+                        // 穿透: 每个敌人只挨一次
+                        if (bullet.piercing && bullet.hitEnemies.has(enemy)) continue;
+
                         let dmg = bullet.damage;
                         let crit = false;
                         if (Math.random() < this.state.modifiers.critChance) { dmg *= 2; crit = true; }
@@ -783,8 +825,32 @@ export class RogueEngine {
                             Math.ceil(dmg).toString(),
                             crit ? '#ff5555' : '#facc15'
                         ));
-                        bullet.markedForDeletion = true;
+
+                        // --- 爆裂弹 (VULCAN_EXPLOSIVE): 命中时 AOE ---
+                        if (bullet.explosive) {
+                            this.triggerBulletExplosion(bullet, enemy, dmg);
+                        }
+
                         if (enemy.health <= 0) this.killEnemy(enemy);
+
+                        // --- 穿透弹 (VULCAN_PIERCE) ---
+                        if (bullet.piercing && bullet.pierceLeft > 0) {
+                            bullet.hitEnemies.add(enemy);
+                            bullet.pierceLeft--;
+                            // 不删除, 继续飞
+                            continue;
+                        }
+
+                        // --- 弹射弹 (VULCAN_BOUNCE): 转向下一个最近的敌人 ---
+                        if (bullet.bouncesLeft > 0) {
+                            const redirected = this.redirectBulletToNearest(bullet, enemy);
+                            if (redirected) {
+                                bullet.bouncesLeft--;
+                                continue;
+                            }
+                        }
+
+                        bullet.markedForDeletion = true;
                     }
                     continue;
                 }
@@ -915,6 +981,72 @@ export class RogueEngine {
     }
 
     // ================== 辅助 ==================
+    /**
+     * VULCAN_EXPLOSIVE: 子弹命中时在命中点附近造成一次小 AOE.
+     * 伤害为子弹原伤害的 60%, 半径 80px.
+     * 同时生成一个 Explosion 实体做视觉反馈 (复用 Bomb.ts 的 Explosion).
+     */
+    private triggerBulletExplosion(bullet: Bullet, centerEnemy: Enemy, bulletDmg: number) {
+        const R = 80;
+        const aoeDmg = bulletDmg * 0.6;
+        const cx = centerEnemy.position.x;
+        const cy = centerEnemy.position.y;
+
+        // 对范围内的其它敌人造成伤害 (中心那个已经挨过主伤)
+        for (const e of this.entities) {
+            if (!(e instanceof Enemy)) continue;
+            if (e === centerEnemy || e.markedForDeletion) continue;
+            const dx = e.position.x - cx;
+            const dy = e.position.y - cy;
+            if (dx * dx + dy * dy > R * R) continue;
+            e.applyDamage(aoeDmg);
+            this.entities.push(new FloatingText(e.position.x, e.position.y,
+                Math.ceil(aoeDmg).toString(), '#fb923c'));
+            if (e.health <= 0) this.killEnemy(e);
+        }
+
+        // 视觉: 一个爆炸环 + 一把橙色粒子
+        const explosion = new Explosion(cx, cy);
+        explosion.maxRadius = R; // 缩小视觉爆炸范围以匹配伤害半径
+        this.entities.push(explosion);
+        for (let i = 0; i < 8; i++) {
+            this.entities.push(new Particle(cx, cy, '#fb923c', 300, 0.35, 2 + Math.random() * 2));
+        }
+    }
+
+    /**
+     * VULCAN_BOUNCE: 让子弹从当前命中的敌人转向场上下一个最近的、未被该弹击中过的敌人.
+     * 返回 true 代表成功转向 (不应删除子弹), false 代表没有合适目标.
+     * 搜索半径限制在 ~260px, 避免子弹"瞬移"到半屏外.
+     */
+    private redirectBulletToNearest(bullet: Bullet, fromEnemy: Enemy): boolean {
+        const MAX_DIST = 260;
+        const maxD2 = MAX_DIST * MAX_DIST;
+        let best: Enemy | null = null;
+        let bestD2 = maxD2;
+        for (const e of this.entities) {
+            if (!(e instanceof Enemy) || e.markedForDeletion) continue;
+            if (e === fromEnemy) continue;
+            if (bullet.hitEnemies.has(e)) continue; // 别弹回已经打过的
+            const dx = e.position.x - bullet.position.x;
+            const dy = e.position.y - bullet.position.y;
+            const d2 = dx * dx + dy * dy;
+            if (d2 < bestD2) { bestD2 = d2; best = e; }
+        }
+        if (!best) return false;
+
+        // 把已命中集记下来, 避免来回弹
+        bullet.hitEnemies.add(fromEnemy);
+
+        const dx = best.position.x - bullet.position.x;
+        const dy = best.position.y - bullet.position.y;
+        const len = Math.hypot(dx, dy) || 1;
+        const speed = Math.hypot(bullet.velocity.x, bullet.velocity.y) || 900;
+        bullet.velocity.x = (dx / len) * speed;
+        bullet.velocity.y = (dy / len) * speed;
+        return true;
+    }
+
     private killEnemy(enemy: Enemy) {
         if (enemy.markedForDeletion) return;
         enemy.markedForDeletion = true;

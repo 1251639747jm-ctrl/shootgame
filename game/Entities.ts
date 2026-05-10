@@ -66,6 +66,12 @@ export class Player extends Entity {
     laserCooldown: number = 0;
     laserCooldownMax: number = 3; // seconds
 
+    // 肉鸽模式激光加成 (由 RogueEngine 写入, 被 Laser.update 读)
+    //   laserDpsMul: 倍率叠加 LASER_DPS_UP perk (默认 1)
+    //   laserWidthMul: 倍率叠加 LASER_WIDTH_UP perk (默认 1)
+    laserDpsMul: number = 1;
+    laserWidthMul: number = 1;
+
     shieldActive: boolean = false; // used by PlayerModel
     invincible: boolean = false;   // 练习场无敌
     unlimitedMana: boolean = false;// 练习场魔法无限
@@ -446,6 +452,14 @@ export class Bullet extends Entity {
     // 穿透射击：命中敌人不消失，但每个敌人只命中一次
     piercing: boolean = false;
     hitEnemies: Set<any> = new Set();
+
+    // === 肉鸽机枪升级标签 (由 RogueEngine.handleWeaponFiring 发射时贴) ===
+    // pierceLeft: 还能穿过几个敌人. 0 = 不穿, 命中即删.
+    pierceLeft: number = 0;
+    // bouncesLeft: 命中后还能弹几次. 0 = 不弹, 命中即删.
+    bouncesLeft: number = 0;
+    // 命中时触发小 AOE 爆炸.
+    explosive: boolean = false;
 
     // FLAK 专用: 多少秒后空爆 (负数=不空爆)
     fuseTimer: number = -1;

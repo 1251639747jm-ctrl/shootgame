@@ -141,19 +141,23 @@ export class Laser extends Entity {
         const t = this.timer;
         let dmgMult = 0;
 
+        // 肉鸽模式升级倍率 (默认 1, 不影响原始玩法)
+        const widthMul = this.owner.laserWidthMul || 1;
+        const dpsMul = this.owner.laserDpsMul || 1;
+
         if (t < BEAM.T_CHARGE) {
             this.phase = 'charge';
             const p = t / BEAM.T_CHARGE;
-            this.currentWidth = BEAM.WIDTH * (0.22 + p * 0.78);
+            this.currentWidth = BEAM.WIDTH * widthMul * (0.22 + p * 0.78);
         } else if (t < BEAM.T_CHARGE + BEAM.T_FIRE) {
             this.phase = 'fire';
             dmgMult = 1;
-            this.currentWidth = BEAM.WIDTH + Math.sin(t * 30) * 2.2;
+            this.currentWidth = BEAM.WIDTH * widthMul + Math.sin(t * 30) * 2.2;
         } else if (t < BEAM.T_CHARGE + BEAM.T_FIRE + BEAM.T_DECAY) {
             this.phase = 'decay';
             const td = t - (BEAM.T_CHARGE + BEAM.T_FIRE);
             const p = 1 - td / BEAM.T_DECAY;
-            this.currentWidth = BEAM.WIDTH * Math.max(0, p);
+            this.currentWidth = BEAM.WIDTH * widthMul * Math.max(0, p);
             dmgMult = p * p;
         } else {
             this.markedForDeletion = true;
@@ -171,7 +175,7 @@ export class Laser extends Entity {
         // 本帧伤害 (per enemy)
         if (dmgMult > 0) {
             const levelBoost = 1 + this.owner.level * 0.18;
-            const dps = BEAM.DPS * this.owner.damageMultiplier * levelBoost * dmgMult;
+            const dps = BEAM.DPS * this.owner.damageMultiplier * levelBoost * dmgMult * dpsMul;
             this.damage = dps * dt;
         } else {
             this.damage = 0;

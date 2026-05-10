@@ -170,7 +170,8 @@ export const PERK_POOL: PerkDef[] = [
     // 通用
     { id: PerkId.DMG_UP, name: '伤害强化', desc: '全局伤害 +25%', icon: '⚔️', color: '#ef4444' },
     { id: PerkId.FIRE_RATE_UP, name: '射速强化', desc: '射速 +20%', icon: '💨', color: '#f97316' },
-    { id: PerkId.SPREAD_UP, name: '散射强化', desc: '散射弹数 +2', icon: '🌟', color: '#eab308' },
+    // 散射只对机枪有意义 (加副弹), 激光/法阵选了毫无作用, 所以限死 VULCAN.
+    { id: PerkId.SPREAD_UP, name: '散射强化', desc: '散射弹数 +2', icon: '🌟', color: '#eab308', requireWeapon: 'VULCAN' },
     { id: PerkId.MAX_HP_UP, name: '生命强化', desc: '最大血量 +30, 立即回满', icon: '❤️', color: '#22c55e', maxStack: 5 },
     { id: PerkId.HEAL, name: '紧急修复', desc: '立即回复 50% 血量', icon: '💚', color: '#10b981' },
     { id: PerkId.MANA_UP, name: '魔力强化', desc: '最大魔力 +30', icon: '💙', color: '#3b82f6', maxStack: 4 },
