@@ -309,6 +309,54 @@ export class Renderer {
                 ctx.beginPath();
                 ctx.arc(0, 0, 3, 0, Math.PI * 2);
                 ctx.fill();
+            } else if ((bullet as any)._isHomingOrb) {
+                // 追踪光球: 紫色能量核心 + 脉动光晕
+                const t = performance.now() * 0.004;
+                const pulse = 1 + Math.sin(t * 6) * 0.18;
+                // 外晕
+                ctx.fillStyle = 'rgba(168, 85, 247, 0.35)';
+                ctx.beginPath();
+                ctx.arc(0, 0, 18 * pulse, 0, Math.PI * 2);
+                ctx.fill();
+                // 中层
+                ctx.fillStyle = 'rgba(192, 132, 252, 0.85)';
+                ctx.beginPath();
+                ctx.arc(0, 0, 10, 0, Math.PI * 2);
+                ctx.fill();
+                // 核心
+                ctx.fillStyle = '#ffffff';
+                ctx.beginPath();
+                ctx.arc(0, 0, 4, 0, Math.PI * 2);
+                ctx.fill();
+            } else if ((bullet as any)._isMine) {
+                // 浮空雷: 齿轮外圈 + 中央红灯
+                const armed = !!(bullet as any)._mineArmed;
+                const t = performance.now() * 0.004;
+                // 外圈
+                ctx.strokeStyle = armed ? '#ef4444' : '#7f1d1d';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(0, 0, 12, 0, Math.PI * 2);
+                ctx.stroke();
+                // 齿 (6 个短刺)
+                ctx.save();
+                ctx.rotate(t * (armed ? 2 : 0.6));
+                for (let i = 0; i < 6; i++) {
+                    ctx.rotate(Math.PI / 3);
+                    ctx.fillStyle = armed ? '#b91c1c' : '#450a0a';
+                    ctx.fillRect(10, -1.5, 6, 3);
+                }
+                ctx.restore();
+                // 中心灯
+                const blink = armed ? (Math.sin(t * 12) * 0.5 + 0.5) : 0.3;
+                ctx.fillStyle = `rgba(239, 68, 68, ${0.35 + blink * 0.65})`;
+                ctx.beginPath();
+                ctx.arc(0, 0, 5, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = '#ffffff';
+                ctx.beginPath();
+                ctx.arc(0, 0, 2, 0, Math.PI * 2);
+                ctx.fill();
             } else {
                 ctx.fillStyle = 'rgba(255, 0, 85, 0.35)';
                 ctx.beginPath();

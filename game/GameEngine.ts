@@ -781,6 +781,10 @@ export class GameEngine {
 
     // EnemyLaser 持续伤害扫描
     this.tickEnemyLaserDamage(dt);
+    // Boss 追踪光球 (HOMING_ORBS)
+    this.tickHomingOrbs(dt);
+    // Boss 布雷 (MINEFIELD)
+    this.tickMines(dt);
 
     this.checkCollisions();
 
@@ -1181,9 +1185,9 @@ export class GameEngine {
   private beginBossSkill(boss: Enemy, enraged: boolean) {
     // 在 Boss 支持的技能池里随机挑一个
     let pool: string[] = [];
-    if (boss.type === EntityType.ENEMY_BOSS)         pool = ['LASER_SWEEP', 'SPIRAL_SHOWER'];
-    if (boss.type === EntityType.ENEMY_BOSS_CARRIER) pool = ['SUMMON_WAVE', 'AIRSTRIKE'];
-    if (boss.type === EntityType.ENEMY_BOSS_REAVER)  pool = ['DASH_SLASH', 'TWIN_LASERS'];
+    if (boss.type === EntityType.ENEMY_BOSS)         pool = ['LASER_SWEEP', 'SPIRAL_SHOWER', 'SHOTGUN_BURST', 'HOMING_ORBS'];
+    if (boss.type === EntityType.ENEMY_BOSS_CARRIER) pool = ['SUMMON_WAVE', 'AIRSTRIKE', 'MINEFIELD', 'BEAM_CURTAIN'];
+    if (boss.type === EntityType.ENEMY_BOSS_REAVER)  pool = ['DASH_SLASH', 'TWIN_LASERS', 'PHASE_SHIFT', 'CROSS_LASERS'];
 
     const skill = pool[Math.floor(Math.random() * pool.length)];
     boss.skillActive = skill;
@@ -1196,7 +1200,13 @@ export class GameEngine {
       SUMMON_WAVE: '! 召唤僚机 !',
       AIRSTRIKE: '! 空爆打击 !',
       DASH_SLASH: '! 冲撞突袭 !',
-      TWIN_LASERS: '! 双向激光 !'
+      TWIN_LASERS: '! 双向激光 !',
+      SHOTGUN_BURST: '! 散弹齐射 !',
+      HOMING_ORBS: '! 追踪光球 !',
+      MINEFIELD: '! 布雷战场 !',
+      BEAM_CURTAIN: '! 激光帘幕 !',
+      PHASE_SHIFT: '! 相位闪现 !',
+      CROSS_LASERS: '! 十字激光 !'
     };
     this.spawnFloatingText(label[skill] || '! 技能 !', enraged ? '#f97316' : '#fde047', {
       x: boss.position.x, y: boss.position.y - boss.radius - 20
@@ -1252,8 +1262,144 @@ export class GameEngine {
         b.color = '#fb923c';
         this.entities.push(b);
       }
+    } else if (skill === 'SHOTGUN_BURST') {
+      // ENEMY_BOSS: 短促三连散弹, 每连朝玩家方向 9 弹扇形, 弹速较快
+      // 实际开火放在 runBossSkill 的节拍触发里
+      // 这里仅记一次轻震屏, 引导玩家绷紧
+      this.addShake(4, 0.2);
+    } else if (skill === 'HOMING_ORBS') {
+      // ENEMY_BOSS: 放出 5 个缓速追踪能量球
+      // 每个球是朝玩家缓慢追踪的敌弹 (设置 target=player, 在 checkCollisions 外靠 tick 给它加速度)
+      if (this.player) {
+        for (let i = 0; i < 5; i++) {
+          const ang = (i - 2) * 0.35;
+          const sx = boss.position.x + Math.sin(ang) * 40;
+          const sy = boss.position.y + 30 + Math.cos(ang) * 10;
+          const b = new Bullet(sx, sy, false);
+          // 初速度朝向玩家大致方向
+          const dx = this.player.position.x - sx;
+          const dy = this.player.position.y - sy;
+          const mag = Math.sqrt(dx * dx + dy * dy) || 1;
+          b.velocity.x = (dx / mag) * 140;
+          b.velocity.y = (dy / mag) * 140;
+          b.radius = 10;
+          b.damage = 14;
+          b.color = '#a855f7';
+          (b as any)._isHomingOrb = true;
+          (b as any)._homingLife = enraged ? 3.6 : 3.0;
+          this.entities.push(b);
+        }
+      }
+    } else if (skill === 'MINEFIELD') {
+      // ENEMY_BOSS_CARRIER: 在屏幕上半部分空投 8 颗激活慢的浮空雷
+      // 先下落 -> 到达随机停留深度后悬停 -> 之后进入"接触即爆"状态, 持续到生命结束自爆
+      for (let i = 0; i < 8; i++) {
+        const sx = 80 + Math.random() * (this.width - 160);
+        const b = new Bullet(sx, boss.position.y + 30, false);
+        b.velocity.x = 0;
+        b.velocity.y = 200;
+        b.radius = 14;
+        b.damage = 22;
+        b.color = '#ef4444';
+        (b as any)._isMine = true;
+        // 目标停留深度 (屏幕中段)
+        (b as any)._mineHoldY = 180 + Math.random() * (this.height * 0.5);
+        (b as any)._mineArmed = false;      // 是否已就位激活
+        (b as any)._mineArmTimer = 0.6 + Math.random() * 0.4;  // 激活前的延迟
+        (b as any)._mineLife = enraged ? 8 : 11; // 到期自爆
+        (b as any)._mineBlastShards = 8;
+        (b as any)._mineBlastDamage = 10;
+        this.entities.push(b);
+      }
+    } else if (skill === 'BEAM_CURTAIN') {
+      // ENEMY_BOSS_CARRIER: 4~5 条不同延迟开火的垂直激光, 玩家需从缝隙穿过
+      // 用 owner=null 让激光钉死在世界坐标, 不随 Boss 漂移
+      const beams = enraged ? 5 : 4;
+      const gap = this.width / (beams + 1);
+      for (let i = 0; i < beams; i++) {
+        const bx = gap * (i + 1);
+        this.entities.push(new EnemyLaser(
+          { x: bx, y: boss.position.y + 20 },
+          0,  // 正下方
+          null,
+          {
+            tele: 0.9 + i * 0.15,   // 逐条错开, 形成"节拍"
+            fire: 1.1,
+            maxWidth: 16,
+            dps: 45,
+            length: this.height,
+            offset: { x: 0, y: 0 }
+          }
+        ));
+      }
+    } else if (skill === 'PHASE_SHIFT') {
+      // ENEMY_BOSS_REAVER: 瞬移 3 次, 每次到达后放一圈放射弹
+      // 第一次瞬移立即执行, 之后 2 次由 runBossSkill 的节拍触发
+      this.phaseShiftBlink(boss);
+    } else if (skill === 'CROSS_LASERS') {
+      // ENEMY_BOSS_REAVER: 4 条十字激光一起扫, 以 Boss 为中心缓慢旋转
+      const rate = enraged ? Math.PI * 0.5 : Math.PI * 0.35;
+      for (let i = 0; i < 4; i++) {
+        const ang = (i / 4) * Math.PI * 2;
+        this.entities.push(new EnemyLaser(
+          { x: boss.position.x, y: boss.position.y },
+          ang,
+          boss,
+          {
+            tele: 0.55,
+            fire: 2.4,
+            maxWidth: 14,
+            dps: 42,
+            length: 1600,
+            rotationRate: rate,
+            offset: { x: 0, y: 0 }
+          }
+        ));
+      }
     }
     // DASH_SLASH 在 runBossSkill 里管 (需要逐帧移动)
+  }
+
+  /**
+   * PHASE_SHIFT 辅助: 让 Boss 瞬移到一个随机安全位置, 并在原地和新位置放一圈放射弹 + 粒子.
+   */
+  private phaseShiftBlink(boss: Enemy) {
+    const oldX = boss.position.x;
+    const oldY = boss.position.y;
+
+    // 旧位置残影 + 小爆光
+    this.createExplosion(oldX, oldY, '#c084fc', 16, 280);
+
+    // 新位置: 屏幕顶端 1/3 内, 远离原位, 避免贴墙
+    const margin = 120;
+    let nx = margin + Math.random() * (this.width - margin * 2);
+    // 尽量和老位置拉开距离
+    if (Math.abs(nx - oldX) < 160) {
+      nx = oldX > this.width / 2 ? margin + 40 : this.width - margin - 40;
+    }
+    const ny = 110 + Math.random() * 120;
+
+    boss.position.x = nx;
+    boss.position.y = ny;
+    // 清一下速度, 免得 Boss 的默认漂移和瞬移叠加
+    boss.velocity.x = 0;
+    boss.velocity.y = 0;
+
+    // 到达时的圆环爆光
+    this.createExplosion(nx, ny, '#c084fc', 24, 360);
+    this.addShake(8, 0.2);
+
+    // 到达时放 10 发放射弹
+    for (let i = 0; i < 10; i++) {
+      const ang = (i / 10) * Math.PI * 2;
+      const b = new Bullet(nx, ny, false);
+      b.velocity.x = Math.cos(ang) * 260;
+      b.velocity.y = Math.sin(ang) * 260;
+      b.radius = 5;
+      b.damage = 9;
+      b.color = '#c084fc';
+      this.entities.push(b);
+    }
   }
 
   private runBossSkill(boss: Enemy, dt: number, enraged: boolean) {
@@ -1306,6 +1452,87 @@ export class GameEngine {
       if (t > 1.8) {
         boss.skillActive = null;
         boss.skillTimer = enraged ? 4 : 7;
+      }
+      return;
+    }
+
+    if (s === 'SHOTGUN_BURST') {
+      // 3 次 "扇形散射", 在 0.25s / 0.75s / 1.25s 各发一次
+      // 每发 9 弹扇形, 朝玩家方向
+      const beats = [0.25, 0.75, 1.25];
+      for (const beat of beats) {
+        if (t >= beat && (t - dt) < beat && this.player) {
+          const dx = this.player.position.x - boss.position.x;
+          const dy = this.player.position.y - boss.position.y;
+          const base = Math.atan2(dy, dx);
+          const pellets = enraged ? 11 : 9;
+          const spread = 0.7;
+          for (let i = 0; i < pellets; i++) {
+            const off = pellets === 1 ? 0 : (i / (pellets - 1) - 0.5) * spread;
+            const ang = base + off;
+            const b = new Bullet(boss.position.x, boss.position.y + 20, false);
+            const sp = 360 + Math.random() * 80;
+            b.velocity.x = Math.cos(ang) * sp;
+            b.velocity.y = Math.sin(ang) * sp;
+            b.radius = 5;
+            b.damage = 9;
+            b.color = '#fbbf24';
+            this.entities.push(b);
+          }
+          this.addShake(3, 0.1);
+        }
+      }
+      if (t > 1.8) {
+        boss.skillActive = null;
+        boss.skillTimer = enraged ? 4 : 6.5;
+      }
+      return;
+    }
+
+    if (s === 'HOMING_ORBS') {
+      // 被动技能: 放出的 _isHomingOrb 子弹在 tickHomingOrbs 里自行追踪
+      // 这里仅等待 3.5s 结束
+      if (t > 3.5) {
+        boss.skillActive = null;
+        boss.skillTimer = enraged ? 5 : 8;
+      }
+      return;
+    }
+
+    if (s === 'MINEFIELD') {
+      // 雷在 tickMines 里自行处理, 这里只等冷却回合
+      if (t > 0.8) {
+        boss.skillActive = null;
+        boss.skillTimer = enraged ? 6 : 9;
+      }
+      return;
+    }
+
+    if (s === 'BEAM_CURTAIN') {
+      // 激光帘幕: 等所有激光自然结束, ~2.8s 足够
+      if (t > 2.8) {
+        boss.skillActive = null;
+        boss.skillTimer = enraged ? 5 : 8;
+      }
+      return;
+    }
+
+    if (s === 'PHASE_SHIFT') {
+      // 瞬移 3 次, 分别在 t=0 (begin 时已做), 0.5, 1.0
+      if (t >= 0.5 && (t - dt) < 0.5) this.phaseShiftBlink(boss);
+      if (t >= 1.0 && (t - dt) < 1.0) this.phaseShiftBlink(boss);
+      if (t > 1.5) {
+        boss.skillActive = null;
+        boss.skillTimer = enraged ? 5 : 7.5;
+      }
+      return;
+    }
+
+    if (s === 'CROSS_LASERS') {
+      // 4 条十字激光在 beginBossSkill 里已发射, 持续 ~3.2s 等它们自然结束
+      if (t > 3.2) {
+        boss.skillActive = null;
+        boss.skillTimer = enraged ? 5.5 : 8;
       }
       return;
     }
@@ -1370,6 +1597,133 @@ export class GameEngine {
       }
       // 激光同一帧不重复伤害同一个玩家
       break;
+    }
+  }
+
+  // ================== Boss 追踪光球 (HOMING_ORBS) 每帧 tick ==================
+  /**
+   * 带有 _isHomingOrb 标记的敌弹会在这里做缓慢转向 + 寿命衰减.
+   * 到期后自爆, 爆炸向四周散射 4 发普通弹 (避免玩家"绕一圈就没事").
+   */
+  private tickHomingOrbs(dt: number) {
+    if (!this.player) return;
+    for (const e of this.entities) {
+      if (!(e instanceof Bullet)) continue;
+      if (e.markedForDeletion) continue;
+      if (!(e as any)._isHomingOrb) continue;
+
+      // 减寿
+      (e as any)._homingLife -= dt;
+      if ((e as any)._homingLife <= 0) {
+        // 自爆
+        e.markedForDeletion = true;
+        this.createExplosion(e.position.x, e.position.y, '#a855f7', 14, 320);
+        for (let i = 0; i < 4; i++) {
+          const ang = (i / 4) * Math.PI * 2 + Math.random() * 0.3;
+          const b = new Bullet(e.position.x, e.position.y, false);
+          b.velocity.x = Math.cos(ang) * 280;
+          b.velocity.y = Math.sin(ang) * 280;
+          b.radius = 4;
+          b.damage = 7;
+          b.color = '#c084fc';
+          this.entities.push(b);
+        }
+        continue;
+      }
+
+      // 缓慢转向玩家 (低转向率, 给玩家回避空间)
+      if (this.player && !this.player.markedForDeletion) {
+        const dx = this.player.position.x - e.position.x;
+        const dy = this.player.position.y - e.position.y;
+        const desired = Math.atan2(dy, dx);
+        const current = Math.atan2(e.velocity.y, e.velocity.x);
+        let diff = ((desired - current + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+        const turnRate = 1.6; // 弧度/秒
+        const clamp = Math.max(-turnRate * dt, Math.min(turnRate * dt, diff));
+        const newAng = current + clamp;
+        // 保持速度大小恒定
+        const speed = Math.sqrt(e.velocity.x * e.velocity.x + e.velocity.y * e.velocity.y) || 140;
+        const targetSp = 170;
+        const finalSp = speed + (targetSp - speed) * Math.min(1, dt * 2);
+        e.velocity.x = Math.cos(newAng) * finalSp;
+        e.velocity.y = Math.sin(newAng) * finalSp;
+      }
+
+      // 尾迹粒子
+      if (Math.random() < 0.35) {
+        const trail = new Particle(e.position.x, e.position.y, '#a855f7', 40, 0.4, 4);
+        trail.velocity.x *= 0.2;
+        trail.velocity.y *= 0.2;
+        this.entities.push(trail);
+      }
+    }
+  }
+
+  // ================== Boss 布雷 (MINEFIELD) 每帧 tick ==================
+  /**
+   * 带 _isMine 标记的敌弹:
+   *  1) 先下落到 _mineHoldY 停住
+   *  2) _mineArmTimer 倒计时后"激活"(外圈闪烁), 到期自爆放射 8 发
+   *  3) 在激活状态下玩家靠近也立即引爆 (接触感知范围 60px)
+   */
+  private tickMines(dt: number) {
+    for (const e of this.entities) {
+      if (!(e instanceof Bullet)) continue;
+      if (e.markedForDeletion) continue;
+      if (!(e as any)._isMine) continue;
+
+      const holdY = (e as any)._mineHoldY as number;
+
+      // 下落减速
+      if (e.position.y < holdY) {
+        // 正常由 Bullet.update 推进, 这里什么都不做
+      } else {
+        // 停下来悬浮
+        e.velocity.y *= 0.86;
+        if (Math.abs(e.velocity.y) < 2) e.velocity.y = 0;
+        // 微微左右漂
+        e.velocity.x = Math.sin(performance.now() / 500 + e.position.x) * 10;
+
+        // 激活倒计时
+        if (!(e as any)._mineArmed) {
+          (e as any)._mineArmTimer -= dt;
+          if ((e as any)._mineArmTimer <= 0) {
+            (e as any)._mineArmed = true;
+            // 激活视觉小闪
+            this.createExplosion(e.position.x, e.position.y, '#ef4444', 3, 120);
+          }
+        }
+      }
+
+      // 寿命衰减 (到期自爆)
+      (e as any)._mineLife -= dt;
+      let explode = (e as any)._mineLife <= 0;
+
+      // 激活后, 玩家靠近 60px 也引爆
+      if (!explode && (e as any)._mineArmed && this.player && !this.player.markedForDeletion) {
+        const dx = this.player.position.x - e.position.x;
+        const dy = this.player.position.y - e.position.y;
+        if (dx * dx + dy * dy < 60 * 60) explode = true;
+      }
+
+      if (explode) {
+        e.markedForDeletion = true;
+        this.createExplosion(e.position.x, e.position.y, '#ef4444', 20, 420);
+        this.addShake(6, 0.2);
+
+        const shards = (e as any)._mineBlastShards as number;
+        const shardDmg = (e as any)._mineBlastDamage as number;
+        for (let i = 0; i < shards; i++) {
+          const ang = (i / shards) * Math.PI * 2;
+          const b = new Bullet(e.position.x, e.position.y, false);
+          b.velocity.x = Math.cos(ang) * 340;
+          b.velocity.y = Math.sin(ang) * 340;
+          b.radius = 5;
+          b.damage = shardDmg;
+          b.color = '#fca5a5';
+          this.entities.push(b);
+        }
+      }
     }
   }
 }
