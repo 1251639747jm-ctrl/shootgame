@@ -19,6 +19,7 @@ export enum CircleElement {
 // ================== 肉鸽状态枚举 ==================
 export enum RoguePhase {
     WEAPON_SELECT,   // 选初始武器
+    ELEMENT_SELECT,  // 选魔法阵派系 (仅当选了魔法阵)
     FIGHTING,        // 战斗中 (打 Boss)
     PERK_SELECT,     // 每层结束选增益
     GAME_OVER,       // 死亡
@@ -264,7 +265,9 @@ export function computeModifiers(perks: PerkId[]): RogueModifiers {
     return m;
 }
 
-/** 从 perk 池中按当前条件抽取 N 张不重复卡 */
+/** 从 perk 池中按当前条件抽取 N 张不重复卡.
+ * 规则: 尽量保证 "武器专属" 和 "通用" 都有出现, 避免玩家全是通用或全是武器偏科.
+ */
 export function drawPerks(
     state: RogueState,
     count: number = 3
@@ -278,19 +281,46 @@ export function drawPerks(
         if (def.unique && state.perks.includes(def.id)) return false;
         // 叠加上限
         if (def.maxStack) {
-            const count = state.perks.filter(p => p === def.id).length;
-            if (count >= def.maxStack) return false;
+            const c = state.perks.filter(p => p === def.id).length;
+            if (c >= def.maxStack) return false;
         }
         return true;
     });
 
-    // Fisher-Yates 取前 N 个
-    const shuffled = [...eligible];
-    for (let i = shuffled.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    // 分类: 武器专属 vs 通用
+    const weaponSpecific = eligible.filter(d => d.requireWeapon || d.requireElement);
+    const generic        = eligible.filter(d => !d.requireWeapon && !d.requireElement);
+
+    const shuffle = <T>(arr: T[]): T[] => {
+        const a = [...arr];
+        for (let i = a.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [a[i], a[j]] = [a[j], a[i]];
+        }
+        return a;
+    };
+
+    const sWeapon  = shuffle(weaponSpecific);
+    const sGeneric = shuffle(generic);
+    const picked: PerkDef[] = [];
+
+    // 先保证抽 1~2 张武器专属 (如果池子里有)
+    const targetWeapon = Math.min(sWeapon.length, Math.max(1, Math.floor(count / 2)));
+    for (let i = 0; i < targetWeapon && picked.length < count; i++) {
+        picked.push(sWeapon[i]);
     }
-    return shuffled.slice(0, count);
+    // 再填通用
+    for (const g of sGeneric) {
+        if (picked.length >= count) break;
+        picked.push(g);
+    }
+    // 还不够 (通用不够时, 再塞武器专属)
+    for (const w of sWeapon) {
+        if (picked.length >= count) break;
+        if (!picked.includes(w)) picked.push(w);
+    }
+
+    return picked.slice(0, count);
 }
 
 /** 创建初始 RogueState */
@@ -298,7 +328,7 @@ export function createRogueState(): RogueState {
     return {
         phase: RoguePhase.WEAPON_SELECT,
         layer: 0,
-        maxLayers: 10,
+        maxLayers: 9999,   // 无限层 (UI 显示 "∞")
         starterWeapon: null,
         circleElement: null,
         perks: [],

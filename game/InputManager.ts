@@ -50,6 +50,21 @@ export class InputManager {
   markUITouch(id: number) { this.uiTouches.add(id); }
   unmarkUITouch(id: number) { this.uiTouches.delete(id); }
 
+  /**
+   * 重置所有瞬时输入状态.
+   * 子引擎 (如 RogueEngine) 启动前调用, 避免把启动按钮那次点击/按键误当成游戏内输入.
+   */
+  reset() {
+    this.isMouseDown = false;
+    this.isClicked = false;
+    this.keys = {};
+    this.keyPressMap = {};
+    this.firingTouches.clear();
+    this.uiTouches.clear();
+    this.joystickTouchId = null;
+    this.joystickActive = false;
+  }
+
   private setupListeners() {
     window.addEventListener('keydown', (e) => {
       const key = e.key.toLowerCase();

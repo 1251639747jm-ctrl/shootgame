@@ -18,13 +18,14 @@ import { CircleElement, RogueModifiers } from "./RogueTypes";
  */
 
 const BASE = {
-    RADIUS: 220,        // 基础半径 (需要够大才能罩住屏幕顶端的 Boss)
-    TICK_INTERVAL: 0.4, // 每 0.4 秒 tick 一次
-    DPS_FIRE: 55,       // 火系每 tick 伤害
-    DPS_ELEC: 45,       // 电系每 tick 伤害 (单目标, 但可连锁)
-    BURN_DPS: 25,       // 火系灼烧额外 DPS
-    CHAIN_COUNT: 3,     // 电系连锁数
-    CHAIN_RANGE: 200    // 连锁跳跃最大距离
+    RADIUS: 280,        // 基础半径 (够大罩住屏幕顶部 Boss)
+    TICK_INTERVAL: 0.25, // 每 0.25 秒 tick 一次 (4 Hz)
+    DPS_FIRE: 90,       // 火系每 tick 伤害
+    DPS_ELEC: 80,       // 电系每 tick 伤害 (单目标, 但可连锁)
+    BURN_DPS: 40,       // 火系灼烧额外 DPS
+    CHAIN_COUNT: 5,     // 电系连锁数
+    CHAIN_RANGE: 260,   // 连锁跳跃最大距离
+    ELEC_SCAN_RANGE: 9999 // 电系起始目标搜索: 全屏 (解决"只在阵内触发"的问题)
 };
 
 /**
@@ -113,6 +114,10 @@ export class MagicCircle extends Entity {
     /**
      * 由 RogueEngine 每帧调用: 检查是否到 tick 时间, 是则对范围内敌人造成伤害.
      * 返回本次 tick 命中的敌人列表 (用于外部生成粒子/飘字).
+     *
+     * 火系: 只对阵内造成伤害 (AOE 范围输出).
+     * 电系: 起始目标从全屏最近的敌人选出, 连锁跳到附近, 不要求必须在阵内
+     *       (避免 Boss 在屏幕顶而法阵罩不到时完全打不到).
      */
     tryTick(enemies: Enemy[]): { hit: Enemy[]; damage: number; chains?: Vector2[] } | null {
         // 激活时 tick 间隔减半 (相当于 DPS 翻倍)
@@ -120,21 +125,23 @@ export class MagicCircle extends Entity {
         if (this.tickTimer < effectiveInterval) return null;
         this.tickTimer -= effectiveInterval;
 
-        const r2 = this.effectRadius * this.effectRadius;
-        const inRange: Enemy[] = [];
-        for (const e of enemies) {
-            if (e.markedForDeletion) continue;
-            const dx = e.position.x - this.position.x;
-            const dy = e.position.y - this.position.y;
-            if (dx * dx + dy * dy <= r2) inRange.push(e);
-        }
-
-        if (inRange.length === 0) return null;
-
         if (this.element === CircleElement.FIRE) {
+            // 火系: 阵内全体 tick
+            const r2 = this.effectRadius * this.effectRadius;
+            const inRange: Enemy[] = [];
+            for (const e of enemies) {
+                if (e.markedForDeletion) continue;
+                const dx = e.position.x - this.position.x;
+                const dy = e.position.y - this.position.y;
+                if (dx * dx + dy * dy <= r2) inRange.push(e);
+            }
+            if (inRange.length === 0) return null;
             return this.tickFire(inRange);
         } else {
-            return this.tickElectric(inRange, enemies);
+            // 电系: 全屏 (不在阵内也能连锁)
+            const alive = enemies.filter(e => !e.markedForDeletion);
+            if (alive.length === 0) return null;
+            return this.tickElectric(alive);
         }
     }
 
@@ -148,14 +155,15 @@ export class MagicCircle extends Entity {
         return { hit: inRange, damage: baseDmg };
     }
 
-    private tickElectric(inRange: Enemy[], allEnemies: Enemy[]): { hit: Enemy[]; damage: number; chains: Vector2[] } {
+    private tickElectric(allEnemies: Enemy[]): { hit: Enemy[]; damage: number; chains: Vector2[] } {
         const baseDmg = BASE.DPS_ELEC * (BASE.TICK_INTERVAL) * this.modifiers.damageMultiplier;
         const chainCount = BASE.CHAIN_COUNT + this.modifiers.circleChainBonus;
 
-        // 选最近的一个作为起始目标
+        // 起始目标: 选全屏最近的敌人 (不再要求在阵内)
         let closest: Enemy | null = null;
         let closestDist = Infinity;
-        for (const e of inRange) {
+        for (const e of allEnemies) {
+            if (e.markedForDeletion) continue;
             const dx = e.position.x - this.position.x;
             const dy = e.position.y - this.position.y;
             const d = dx * dx + dy * dy;
@@ -185,8 +193,8 @@ export class MagicCircle extends Entity {
             hitSet.add(next);
             hit.push(next);
             chains.push({ x: next.position.x, y: next.position.y });
-            // 连锁伤害递减 20%
-            const chainDmg = baseDmg * Math.pow(0.8, i + 1);
+            // 连锁伤害递减 15% (比之前 20% 温和些)
+            const chainDmg = baseDmg * Math.pow(0.85, i + 1);
             next.applyDamage(chainDmg);
             current = next;
         }

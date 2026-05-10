@@ -49,8 +49,13 @@ export class RogueEngine {
     shakeIntensity: number = 0;
     hitStopTimer: number = 0;
 
-    // 小怪刷新计时
-    minionSpawnTimer: number = 3; // 初始延迟 3s
+    // 波次 / Boss 计时
+    minionSpawnTimer: number = 0; // 下次刷小怪的倒计时
+    bossArrivalTimer: number = 0; // 预热完之后多久出 Boss (负数 = 已出/不需要)
+    bossWarningTimer: number = 0; // Boss 来袭警告显示剩余时间
+    bossSpawned: boolean = false;  // 本层 Boss 是否已生成
+    preBossMinionsSpawned: number = 0; // 出 Boss 前已刷的小怪波数
+
     // Boss 出场宽限时间 (不会立即开火)
     bossGraceTimer: number = 0;
 
@@ -86,6 +91,8 @@ export class RogueEngine {
     start() {
         this.state = createRogueState();
         this.running = true;
+        // 清空任何残留的输入 (比如菜单上点 "ROGUE RUN" 那次点击不能被消费成选武器)
+        this.input.reset();
         this.lastTime = performance.now();
         requestAnimationFrame(this.loop.bind(this));
     }
@@ -129,6 +136,9 @@ export class RogueEngine {
             case RoguePhase.WEAPON_SELECT:
                 this.updateWeaponSelect();
                 break;
+            case RoguePhase.ELEMENT_SELECT:
+                this.updateElementSelect();
+                break;
             case RoguePhase.FIGHTING:
                 this.updateFighting(dt);
                 break;
@@ -150,9 +160,23 @@ export class RogueEngine {
             if (choice !== null) {
                 this.state.starterWeapon = choice;
                 if (choice === 'MAGIC_CIRCLE') {
-                    // 点左半选火, 右半选电
-                    this.state.circleElement = click.x < this.width / 2 ? CircleElement.FIRE : CircleElement.ELECTRIC;
+                    // 进入派系选择阶段, 而不是根据左右半屏猜
+                    this.state.phase = RoguePhase.ELEMENT_SELECT;
+                } else {
+                    this.startLayer();
                 }
+            }
+            this.input.isClicked = false;
+        }
+    }
+
+    // ================== 派系选择阶段 (仅魔法阵) ==================
+    private updateElementSelect() {
+        if (this.input.isClicked) {
+            const click = this.input.lastClickPos;
+            const elem = this.ui.hitTestElementCards(click.x, click.y);
+            if (elem !== null) {
+                this.state.circleElement = elem;
                 this.startLayer();
             }
             this.input.isClicked = false;
@@ -190,8 +214,8 @@ export class RogueEngine {
         this.player.position.x = Math.max(20, Math.min(this.width - 20, this.player.position.x));
         this.player.position.y = Math.max(20, Math.min(this.height - 20, this.player.position.y));
 
-        // ========== 小怪刷新 ==========
-        this.tickMinionSpawn(dt);
+        // ========== 小怪 / Boss 波次调度 ==========
+        this.tickWaveSchedule(dt);
 
         // ========== 实体更新 ==========
         const enemies = this.entities.filter(e => e instanceof Enemy && !e.markedForDeletion) as Enemy[];
@@ -253,7 +277,7 @@ export class RogueEngine {
         this.entities = this.entities.filter(e => !e.markedForDeletion);
 
         // ========== Boss 死亡判定 ==========
-        if (!this.bossDefeated && this.boss && this.boss.markedForDeletion) {
+        if (!this.bossDefeated && this.bossSpawned && this.boss && this.boss.markedForDeletion) {
             this.bossDefeated = true;
             // 清掉残余小怪/子弹, 避免选 Perk 时 UI 被挡
             for (const e of this.entities) {
@@ -346,6 +370,9 @@ export class RogueEngine {
             case RoguePhase.WEAPON_SELECT:
                 this.ui.drawWeaponSelect(this.state);
                 break;
+            case RoguePhase.ELEMENT_SELECT:
+                this.ui.drawElementSelect(this.state);
+                break;
             case RoguePhase.PERK_SELECT:
                 this.ui.drawPerkSelect(this.state);
                 break;
@@ -359,12 +386,25 @@ export class RogueEngine {
     }
 
     // ================== 层级管理 ==================
+    /**
+     * 每层节奏:
+     *   1) 清场, 创建玩家
+     *   2) 先刷 N 波小怪 (N 随层数增加), 每波间隔几秒
+     *   3) 小怪刷完 -> 显示 "BOSS INCOMING!" 警告 1.5s
+     *   4) Boss 从顶部入场
+     *   5) Boss 被打死 -> 选 Perk -> 下一层
+     */
     private startLayer() {
         this.state.layer++;
         this.state.phase = RoguePhase.FIGHTING;
-        this.state.bossHpScale = 1 + (this.state.layer - 1) * 0.4;
+        // 无限层: 每 10 层 Boss 血量翻倍, 避免后期过热
+        this.state.bossHpScale = 1 + (this.state.layer - 1) * 0.3;
         this.bossDefeated = false;
         this.boss = null;
+        this.bossSpawned = false;
+        this.preBossMinionsSpawned = 0;
+        this.bossArrivalTimer = -1;    // 设成负数代表"还没开始计时"
+        this.bossWarningTimer = 0;
 
         // 清场
         this.entities = [];
@@ -388,12 +428,41 @@ export class RogueEngine {
             this.player.currentWeapon = WeaponType.LASER;
         }
 
-        // 生成 Boss
-        this.spawnLayerBoss();
+        // 刷怪计时: 进入 1.2s 后开始第一波小怪
+        this.minionSpawnTimer = 1.2;
+        this.bossGraceTimer = 0;
+    }
 
-        // 小怪刷新计时重置 (出场 3s 后第一波小怪)
-        this.minionSpawnTimer = 3;
-        this.bossGraceTimer = 1.2;
+    /** 本层应该刷几波小怪才出 Boss */
+    private preBossWaveCount(): number {
+        // layer 1: 2 波, 层数越高波数越多, 封顶 6 波
+        return Math.min(6, 2 + Math.floor(this.state.layer / 2));
+    }
+
+    /** 刷一波小怪 (小怪定时器每次到期调用) */
+    private spawnMinionWave() {
+        const layer = this.state.layer;
+        const difficulty = 0.8 + layer * 0.12;
+        // 每波数量: layer 1 = 2-3, layer 10 = 5-6
+        const baseCount = 2 + Math.floor(layer / 3);
+        const jitter = Math.floor(Math.random() * 2);
+        const count = baseCount + jitter;
+
+        // 30% 蜂群波 / 否则普通混合
+        if (Math.random() < 0.3 && layer >= 2) {
+            const baseX = 100 + Math.random() * (this.width - 200);
+            const n = 3 + Math.floor(Math.random() * 3);
+            for (let i = 0; i < n; i++) {
+                const sx = Math.max(30, Math.min(this.width - 30, baseX + (i - (n - 1) / 2) * 45));
+                this.entities.push(new Enemy(sx, -60 - i * 25, difficulty, false, EntityType.ENEMY_SWARMER));
+            }
+            return;
+        }
+
+        for (let i = 0; i < count; i++) {
+            const x = 50 + Math.random() * (this.width - 100);
+            this.entities.push(new Enemy(x, -60 - i * 45, difficulty, false));
+        }
     }
 
     private spawnLayerBoss() {
@@ -402,50 +471,55 @@ export class RogueEngine {
         const boss = new Enemy(this.width / 2, -120, this.state.bossHpScale, true, chosen);
         this.boss = boss;
         this.entities.push(boss);
+        this.bossSpawned = true;
+        this.bossGraceTimer = 1.2;
     }
 
     /**
-     * 小怪定时刷新: 层数越高刷的越密/越多
-     * 每波可能是 1 种常规敌人或 3~5 只蜂群
+     * 战斗中的波次/Boss 调度.
+     * 先刷完预定波数的小怪, 再 1.5s 警告后 Boss 出场.
      */
-    private tickMinionSpawn(dt: number) {
-        if (!this.boss || this.boss.markedForDeletion) return;
-        if (this.boss.position.y < 0) return; // boss 还没进场
+    private tickWaveSchedule(dt: number) {
+        if (!this.player || this.player.markedForDeletion) return;
 
-        this.minionSpawnTimer -= dt;
-        if (this.minionSpawnTimer > 0) return;
-
-        // 刷新间隔: layer 1 每 4.5s, layer 10 每 2.0s
-        const interval = Math.max(2.0, 5.0 - this.state.layer * 0.3);
-        this.minionSpawnTimer = interval + (Math.random() - 0.5) * 0.6;
-
-        // 怪数: layer 1 = 1, layer 10 ~ 3~4
-        const baseCount = 1 + Math.floor(this.state.layer / 3);
-        const difficulty = 0.8 + this.state.layer * 0.1;
-
-        // 30% 概率刷一波蜂群
-        if (Math.random() < 0.3 && this.state.layer >= 2) {
-            const baseX = 100 + Math.random() * (this.width - 200);
-            const count = 3 + Math.floor(Math.random() * 3);
-            for (let i = 0; i < count; i++) {
-                const sx = Math.max(30, Math.min(this.width - 30, baseX + (i - (count - 1) / 2) * 45));
-                this.entities.push(new Enemy(sx, -60 - i * 25, difficulty, false, EntityType.ENEMY_SWARMER));
+        // Boss 警告 倒计时 -> 生成 Boss
+        if (this.bossWarningTimer > 0) {
+            this.bossWarningTimer -= dt;
+            if (this.bossWarningTimer <= 0 && !this.bossSpawned) {
+                this.spawnLayerBoss();
             }
             return;
         }
 
-        // 普通小怪
-        for (let i = 0; i < baseCount; i++) {
-            const x = 50 + Math.random() * (this.width - 100);
-            this.entities.push(new Enemy(x, -60 - i * 40, difficulty, false));
+        // Boss 已出 -> 不再刷常规小怪 (Boss 技能仍可能召唤)
+        if (this.bossSpawned) return;
+
+        // 还在刷小怪阶段
+        this.minionSpawnTimer -= dt;
+        if (this.minionSpawnTimer > 0) return;
+
+        if (this.preBossMinionsSpawned < this.preBossWaveCount()) {
+            this.spawnMinionWave();
+            this.preBossMinionsSpawned++;
+
+            // 波间隔: 高层更短
+            const baseInterval = Math.max(2.2, 4.2 - this.state.layer * 0.2);
+            this.minionSpawnTimer = baseInterval + (Math.random() - 0.5) * 0.5;
+        } else {
+            // 波数刷满 -> 开启 Boss 警告
+            this.bossWarningTimer = 1.8;
+            this.entities.push(new FloatingText(
+                this.width / 2, this.height / 2 - 40,
+                '!!! BOSS INCOMING !!!',
+                '#ef4444'
+            ));
+            this.addShake(6, 0.3);
+            this.minionSpawnTimer = 9999; // 不再刷
         }
     }
 
     private onLayerClear() {
-        if (this.state.layer >= this.state.maxLayers) {
-            this.state.phase = RoguePhase.VICTORY;
-            return;
-        }
+        // 无上限: 不再进入 VICTORY, 持续挑战
         // 选增益
         this.state.perkChoices = drawPerks(this.state, 3);
         this.state.phase = RoguePhase.PERK_SELECT;
@@ -481,9 +555,12 @@ export class RogueEngine {
         this.player.thrust = 2000 * m.moveSpeedMultiplier;
         this.player.damageMultiplier = m.damageMultiplier;
 
-        // 激光冷却缩减
+        // 肉鸽模式激光: 去掉冷却 (连续蓄射, 不再是慢充单发)
         if (this.state.starterWeapon === 'LASER') {
-            this.player.laserCooldownMax = Math.max(0.5, 3 - m.laserCdReduction);
+            this.player.laserCooldownMax = 0;
+            this.player.laserCooldown = 0;
+            // 蓄力速度随 modifiers 缩放 (laserCdReduction 提供加成)
+            this.player.chargeRate = 80 + 25 * m.laserCdReduction;
         }
 
         // 射速 (机枪)
@@ -512,11 +589,9 @@ export class RogueEngine {
                 }
             }
         } else if (this.state.starterWeapon === 'LASER') {
+            // 肉鸽激光: 无冷却, 按住就连续蓄射
             const existingBeam = this.entities.find(e => e instanceof Laser && (e as Laser).owner === this.player);
-            if (this.player.laserCooldown > 0) {
-                this.player.isCharging = false;
-                this.player.chargeLevel = 0;
-            } else if (isFiring && !existingBeam) {
+            if (isFiring && !existingBeam) {
                 this.player.isCharging = true;
                 this.player.chargeLevel = Math.min(100, this.player.chargeLevel + this.player.chargeRate * dt);
                 const pulseCount = 2 + Math.floor(this.player.chargeLevel / 25);
@@ -527,8 +602,7 @@ export class RogueEngine {
                     this.entities.push(new Laser(this.player));
                     this.player.chargeLevel = 0;
                     this.player.isCharging = false;
-                    this.player.laserCooldown = this.player.laserCooldownMax;
-                    this.addShake(10, 0.35);
+                    this.addShake(8, 0.25);
                 }
             } else {
                 this.player.isCharging = false;

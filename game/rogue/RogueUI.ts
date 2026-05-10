@@ -1,5 +1,5 @@
 import { Player, Enemy } from "../Entities";
-import { RogueState, RoguePhase, PerkDef, STARTER_OPTIONS, PERK_POOL, PerkId } from "./RogueTypes";
+import { RogueState, RoguePhase, PerkDef, STARTER_OPTIONS, PERK_POOL, PerkId, CircleElement } from "./RogueTypes";
 
 /**
  * 肉鸽模式 UI 绘制 + 点击判定
@@ -19,6 +19,7 @@ export class RogueUI {
     // 卡片布局缓存
     private starterCardRects: { x: number; y: number; w: number; h: number }[] = [];
     private perkCardRects: { x: number; y: number; w: number; h: number }[] = [];
+    private elementCardRects: { x: number; y: number; w: number; h: number }[] = [];
 
     constructor(ctx: CanvasRenderingContext2D, width: number, height: number) {
         this.ctx = ctx;
@@ -85,7 +86,7 @@ export class RogueUI {
         ctx.font = '13px sans-serif';
         ctx.fillStyle = '#64748b';
         ctx.textAlign = 'center';
-        ctx.fillText('魔法阵: 点左半=火系 | 点右半=电系', this.width / 2, this.height - 40);
+        ctx.fillText('选择魔法阵后还需选择元素派系', this.width / 2, this.height - 40);
     }
 
     hitTestStarterCards(mx: number, my: number): 'VULCAN' | 'LASER' | 'MAGIC_CIRCLE' | null {
@@ -93,6 +94,81 @@ export class RogueUI {
             const r = this.starterCardRects[i];
             if (mx >= r.x && mx <= r.x + r.w && my >= r.y && my <= r.y + r.h) {
                 return STARTER_OPTIONS[i].key;
+            }
+        }
+        return null;
+    }
+
+    // ================== 派系选择画面 (魔法阵专属) ==================
+    drawElementSelect(state: RogueState) {
+        const ctx = this.ctx;
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.78)';
+        ctx.fillRect(0, 0, this.width, this.height);
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 34px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('选择魔法阵派系', this.width / 2, 90);
+
+        ctx.font = '15px sans-serif';
+        ctx.fillStyle = '#a5b4fc';
+        ctx.fillText('两种派系路线相互独立, 对应不同的专属增益', this.width / 2, 128);
+
+        const cardW = 240;
+        const cardH = 300;
+        const gap = 48;
+        const totalW = cardW * 2 + gap;
+        const startX = (this.width - totalW) / 2;
+        const startY = (this.height - cardH) / 2;
+
+        this.elementCardRects = [];
+        const options = [
+            { key: CircleElement.FIRE, name: '火系', icon: '🔥', color: '#fb923c',
+              desc: '阵内 AOE 持续灼烧, 附带爆发脉冲 · 适合站桩输出' },
+            { key: CircleElement.ELECTRIC, name: '电系', icon: '⚡', color: '#a78bfa',
+              desc: '连锁闪电跳跃全屏, 忽略范围限制 · 适合小怪清场' }
+        ];
+
+        options.forEach((opt, i) => {
+            const cx = startX + i * (cardW + gap);
+            const cy = startY;
+            this.elementCardRects.push({ x: cx, y: cy, w: cardW, h: cardH });
+
+            ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
+            ctx.strokeStyle = opt.color;
+            ctx.lineWidth = 2.5;
+            ctx.beginPath();
+            ctx.roundRect(cx, cy, cardW, cardH, 14);
+            ctx.fill();
+            ctx.stroke();
+
+            // 顶部彩带
+            ctx.fillStyle = opt.color;
+            ctx.beginPath();
+            ctx.roundRect(cx, cy, cardW, 8, [14, 14, 0, 0]);
+            ctx.fill();
+
+            ctx.font = '72px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(opt.icon, cx + cardW / 2, cy + 90);
+
+            ctx.font = 'bold 26px sans-serif';
+            ctx.fillStyle = opt.color;
+            ctx.fillText(opt.name, cx + cardW / 2, cy + 160);
+
+            ctx.font = '14px sans-serif';
+            ctx.fillStyle = '#cbd5e1';
+            this.wrapText(opt.desc, cx + cardW / 2, cy + 205, cardW - 36, 22);
+        });
+    }
+
+    hitTestElementCards(mx: number, my: number): CircleElement | null {
+        const map = [CircleElement.FIRE, CircleElement.ELECTRIC];
+        for (let i = 0; i < this.elementCardRects.length; i++) {
+            const r = this.elementCardRects[i];
+            if (mx >= r.x && mx <= r.x + r.w && my >= r.y && my <= r.y + r.h) {
+                return map[i];
             }
         }
         return null;
@@ -191,7 +267,7 @@ export class RogueUI {
         ctx.font = 'bold 13px sans-serif';
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
-        ctx.fillText(`LAYER ${state.layer}/${state.maxLayers}`, badgeX + 10, badgeY + badgeH / 2);
+        ctx.fillText(`LAYER ${state.layer} · ∞`, badgeX + 10, badgeY + badgeH / 2);
 
         // Boss 血条 (屏幕顶部中央)
         if (boss && !boss.markedForDeletion && boss.position.y > -50) {
