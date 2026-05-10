@@ -115,6 +115,14 @@ const App: React.FC = () => {
     setGameState(GameState.MENU);
     setPlayerState(null);
   };
+  const handleStartRogue = () => {
+    setGameState(GameState.ROGUE);
+    setScore(0); setHealth(100); setPlayerState(null);
+  };
+  const handleExitRogue = () => {
+    setGameState(GameState.MENU);
+    setPlayerState(null);
+  };
   const handleGameOver = (finalScore: number) => {
     setGameState(GameState.GAME_OVER);
     if (finalScore > highScore) {
@@ -359,6 +367,7 @@ const App: React.FC = () => {
         onHealthChange={setHealth}
         onGameOver={handleGameOver}
         onWeaponChange={setCurrentWeapon}
+        onRogueExit={handleExitRogue}
       />
 
       {/* =============== SETTINGS MODAL =============== */}
@@ -410,7 +419,7 @@ const App: React.FC = () => {
       )}
 
       {/* =============== 齿轮 (菜单界面可见) =============== */}
-      {gameState !== GameState.PLAYING && (
+      {gameState !== GameState.PLAYING && gameState !== GameState.ROGUE && (
         <button
           onClick={() => setShowSettings(true)}
           className="absolute bottom-6 left-6 z-40 p-2 bg-black/40 border border-white/10 rounded-md hover:bg-white/10 transition-colors"
@@ -483,6 +492,23 @@ const App: React.FC = () => {
         />
       )}
 
+      {/* =============== 肉鸽模式顶栏 (Canvas 自己绘 UI, 这里只提供退出按钮) =============== */}
+      {gameState === GameState.ROGUE && (
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 pointer-events-none">
+          <div className="pointer-events-auto flex items-center gap-2 px-3 py-1.5 rounded border border-pink-500/50 bg-[rgba(30,5,30,0.85)] backdrop-blur-md shadow-[0_0_14px_rgba(244,114,182,0.3)]">
+            <SwordsIcon size={14} active />
+            <span className="text-[11px] font-black tracking-[0.3em] text-pink-200">ROGUE RUN</span>
+          </div>
+          <button
+            onClick={handleExitRogue}
+            className="pointer-events-auto flex items-center gap-1 px-3 py-1.5 rounded border border-red-500/50 bg-[rgba(60,10,10,0.8)] hover:bg-red-900/70 text-red-100 text-[11px] font-bold tracking-wider active:scale-95 transition backdrop-blur-md"
+          >
+            <ExitIcon size={14} />
+            EXIT
+          </button>
+        </div>
+      )}
+
       {/* =============== 主菜单 =============== */}
       {gameState === GameState.MENU && (
         <div className="absolute inset-0 flex flex-col items-center justify-center z-10 bg-black/70 backdrop-blur-sm">
@@ -513,6 +539,7 @@ const App: React.FC = () => {
           {/* 主按钮 */}
           <div className="flex flex-col gap-4 w-72">
             <MenuButton onClick={handleStartGame} color="#22d3ee" icon={<RocketIcon size={22} active />} label="ENGAGE" primary />
+            <MenuButton onClick={handleStartRogue} color="#f472b6" icon={<SwordsIcon size={18} active />} label="ROGUE RUN" />
             <MenuButton onClick={handleStartPractice} color="#a78bfa" icon={<TargetIcon size={22} active />} label="PRACTICE RANGE" />
           </div>
 
@@ -521,7 +548,8 @@ const App: React.FC = () => {
             <p>📱 <span className="text-cyan-300">Mobile:</span> 左半屏拖动 = 移动 · 右半屏按住 = 开火</p>
             <p className="hidden md:block">🖥️ <span className="text-cyan-300">Desktop:</span> WASD 移动 · 鼠标/空格 开火 · Q 换武器</p>
             <p><span className="text-cyan-300">Skills:</span> 按屏幕右下方按钮或键盘 1 / 2 / 3</p>
-            <p className="text-violet-300/80 pt-1 border-t border-white/5">试验场: 无敌 · 魔法无限 · 任选武器 · 放置 Bot 练手感</p>
+            <p className="text-pink-300/80 pt-1 border-t border-white/5">肉鸽模式: 三选一武器 (机枪/激光/魔法阵) · 逐层打 Boss · 每层选增益</p>
+            <p className="text-violet-300/80">试验场: 无敌 · 魔法无限 · 任选武器 · 放置 Bot 练手感</p>
           </div>
         </div>
       )}

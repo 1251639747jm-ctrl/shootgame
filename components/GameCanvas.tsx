@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useImperativeHandle, forwardRef } from 'react';
 import { GameEngine } from '../game/GameEngine';
+import { RogueEngine } from '../game/rogue';
 import { GameState, GameRef, WeaponType, GameSettings, BotKind } from '../types';
 
 interface GameCanvasProps {
@@ -8,6 +9,8 @@ interface GameCanvasProps {
   onHealthChange: (health: number) => void;
   onGameOver: (score: number) => void;
   onWeaponChange: (weapon: WeaponType) => void;
+  /** Rogue 模式内部自己死亡/通关/用户点击继续后通知 App 回菜单 */
+  onRogueExit?: () => void;
 }
 
 export const GameCanvas = forwardRef<GameRef, GameCanvasProps>(({
@@ -15,10 +18,40 @@ export const GameCanvas = forwardRef<GameRef, GameCanvasProps>(({
   onScoreChange,
   onHealthChange,
   onGameOver,
-  onWeaponChange
+  onWeaponChange,
+  onRogueExit
 }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<GameEngine | null>(null);
+  const rogueRef = useRef<RogueEngine | null>(null);
+
+  // 保存最新的 onRogueExit 引用, 方便 RogueEngine 回调读取
+  const rogueExitRef = useRef(onRogueExit);
+  useEffect(() => { rogueExitRef.current = onRogueExit; }, [onRogueExit]);
+
+  const startRogue = () => {
+    if (!canvasRef.current || !engineRef.current) return;
+    // 让主引擎让位
+    engineRef.current.suspendForRogue();
+    if (!rogueRef.current) {
+      rogueRef.current = new RogueEngine(canvasRef.current, () => {
+        // 退出回调: 停掉 rogue, 回菜单
+        rogueRef.current?.stop();
+        rogueExitRef.current?.();
+      });
+    }
+    rogueRef.current.resize(canvasRef.current.width, canvasRef.current.height);
+    rogueRef.current.start();
+  };
+
+  const stopRogue = () => {
+    rogueRef.current?.stop();
+    // 回菜单背景 (先重置状态再调用 startMenuAnimation, 因为它对 ROGUE 状态 early-return)
+    if (engineRef.current) {
+      engineRef.current.state = GameState.MENU;
+      engineRef.current.startMenuAnimation();
+    }
+  };
 
   useImperativeHandle(ref, () => ({
     switchWeapon: () => engineRef.current?.triggerWeaponSwitch(),
@@ -34,7 +67,9 @@ export const GameCanvas = forwardRef<GameRef, GameCanvasProps>(({
     stopPractice: () => engineRef.current?.stopPractice(),
     spawnPracticeBot: (kind: BotKind) => engineRef.current?.spawnPracticeBot(kind),
     clearPracticeBots: () => engineRef.current?.clearPracticeBots(),
-    selectWeapon: (w: WeaponType) => engineRef.current?.selectWeapon(w)
+    selectWeapon: (w: WeaponType) => engineRef.current?.selectWeapon(w),
+    startRogue,
+    stopRogue
   }));
 
   useEffect(() => {
@@ -53,6 +88,7 @@ export const GameCanvas = forwardRef<GameRef, GameCanvasProps>(({
         canvasRef.current.width = window.innerWidth;
         canvasRef.current.height = window.innerHeight;
         engineRef.current.resize(window.innerWidth, window.innerHeight);
+        rogueRef.current?.resize(window.innerWidth, window.innerHeight);
       }
     };
 
@@ -72,12 +108,18 @@ export const GameCanvas = forwardRef<GameRef, GameCanvasProps>(({
     if (!engine) return;
 
     if (gameState === GameState.PLAYING && engine.state !== GameState.PLAYING) {
+      rogueRef.current?.stop();
       engine.start();
     } else if (gameState === GameState.PRACTICE && engine.state !== GameState.PRACTICE) {
+      rogueRef.current?.stop();
       engine.startPractice();
+    } else if (gameState === GameState.ROGUE && engine.state !== GameState.ROGUE) {
+      startRogue();
     } else if (gameState === GameState.MENU && engine.state !== GameState.MENU) {
+      rogueRef.current?.stop();
       engine.stopPractice();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gameState]);
 
   return (

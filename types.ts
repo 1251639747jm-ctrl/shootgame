@@ -131,4 +131,7 @@ export interface GameRef {
   spawnPracticeBot: (kind: BotKind) => void;
   clearPracticeBots: () => void;
   selectWeapon: (w: WeaponType) => void;
+  // Rogue mode
+  startRogue: () => void;
+  stopRogue: () => void;
 }

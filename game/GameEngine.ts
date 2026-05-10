@@ -100,14 +100,21 @@ export class GameEngine {
   }
 
   startMenuAnimation() {
-    if (this.state === GameState.PLAYING || this.state === GameState.PRACTICE) return;
+    if (this.state === GameState.PLAYING || this.state === GameState.PRACTICE || this.state === GameState.ROGUE) return;
     this.state = GameState.MENU;
     this.lastTime = performance.now();
     requestAnimationFrame(this.menuLoop.bind(this));
   }
 
+  /** 让 GameEngine 暂停让位给 RogueEngine (共用 canvas) */
+  suspendForRogue() {
+    this.state = GameState.ROGUE;
+    this.entities = [];
+    this.player = null;
+  }
+
   menuLoop(timestamp: number) {
-    if (this.state === GameState.PLAYING || this.state === GameState.PRACTICE) return;
+    if (this.state === GameState.PLAYING || this.state === GameState.PRACTICE || this.state === GameState.ROGUE) return;
 
     const dt = Math.min((timestamp - this.lastTime) / 1000, 0.1);
     this.lastTime = timestamp;
