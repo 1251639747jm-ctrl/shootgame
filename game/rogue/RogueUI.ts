@@ -1,5 +1,5 @@
-import { Player } from "../Entities";
-import { RogueState, RoguePhase, PerkDef, STARTER_OPTIONS, StarterConfig } from "./RogueTypes";
+import { Player, Enemy } from "../Entities";
+import { RogueState, RoguePhase, PerkDef, STARTER_OPTIONS, PERK_POOL, PerkId } from "./RogueTypes";
 
 /**
  * 肉鸽模式 UI 绘制 + 点击判定
@@ -8,7 +8,7 @@ import { RogueState, RoguePhase, PerkDef, STARTER_OPTIONS, StarterConfig } from 
  * 包含:
  * - 初始武器选择 (3 张大卡片)
  * - Perk 选择 (3 张卡片)
- * - 战斗 HUD (层数, 血条)
+ * - 战斗 HUD (层数 / 玩家血条 / Boss 血条 / 武器 / 技能 / 已获得增益)
  * - 结束画面
  */
 export class RogueUI {
@@ -34,11 +34,9 @@ export class RogueUI {
     // ================== 武器选择画面 ==================
     drawWeaponSelect(state: RogueState) {
         const ctx = this.ctx;
-        // 半透明遮罩
         ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
         ctx.fillRect(0, 0, this.width, this.height);
 
-        // 标题
         ctx.fillStyle = '#ffffff';
         ctx.font = 'bold 36px sans-serif';
         ctx.textAlign = 'center';
@@ -49,7 +47,6 @@ export class RogueUI {
         ctx.fillStyle = '#94a3b8';
         ctx.fillText('肉鸽模式 · 每层击败 Boss 后选择增益', this.width / 2, 120);
 
-        // 3 张卡片
         const cardW = 180;
         const cardH = 260;
         const gap = 30;
@@ -64,7 +61,6 @@ export class RogueUI {
             const cy = startY;
             this.starterCardRects.push({ x: cx, y: cy, w: cardW, h: cardH });
 
-            // 卡片背景
             ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
             ctx.strokeStyle = opt.color;
             ctx.lineWidth = 2;
@@ -73,23 +69,19 @@ export class RogueUI {
             ctx.fill();
             ctx.stroke();
 
-            // 图标
             ctx.font = '48px sans-serif';
             ctx.textAlign = 'center';
             ctx.fillText(opt.icon, cx + cardW / 2, cy + 60);
 
-            // 名称
             ctx.font = 'bold 22px sans-serif';
             ctx.fillStyle = opt.color;
             ctx.fillText(opt.name, cx + cardW / 2, cy + 110);
 
-            // 描述 (自动换行)
             ctx.font = '13px sans-serif';
             ctx.fillStyle = '#cbd5e1';
             this.wrapText(opt.desc, cx + cardW / 2, cy + 145, cardW - 24, 18);
         });
 
-        // 魔法阵提示
         ctx.font = '13px sans-serif';
         ctx.fillStyle = '#64748b';
         ctx.textAlign = 'center';
@@ -109,11 +101,9 @@ export class RogueUI {
     // ================== Perk 选择画面 ==================
     drawPerkSelect(state: RogueState) {
         const ctx = this.ctx;
-        // 遮罩
         ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
         ctx.fillRect(0, 0, this.width, this.height);
 
-        // 标题
         ctx.fillStyle = '#ffffff';
         ctx.font = 'bold 32px sans-serif';
         ctx.textAlign = 'center';
@@ -123,7 +113,6 @@ export class RogueUI {
         ctx.fillStyle = '#a5b4fc';
         ctx.fillText('选择一项增益', this.width / 2, 95);
 
-        // 卡片
         const cardW = 200;
         const cardH = 280;
         const gap = 24;
@@ -139,7 +128,6 @@ export class RogueUI {
             const cy = startY;
             this.perkCardRects.push({ x: cx, y: cy, w: cardW, h: cardH });
 
-            // 卡片
             ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
             ctx.strokeStyle = perk.color;
             ctx.lineWidth = 2.5;
@@ -148,28 +136,23 @@ export class RogueUI {
             ctx.fill();
             ctx.stroke();
 
-            // 顶部彩色条
             ctx.fillStyle = perk.color;
             ctx.beginPath();
             ctx.roundRect(cx, cy, cardW, 6, [12, 12, 0, 0]);
             ctx.fill();
 
-            // 图标
             ctx.font = '44px sans-serif';
             ctx.textAlign = 'center';
             ctx.fillText(perk.icon, cx + cardW / 2, cy + 60);
 
-            // 名称
             ctx.font = 'bold 20px sans-serif';
             ctx.fillStyle = perk.color;
             ctx.fillText(perk.name, cx + cardW / 2, cy + 105);
 
-            // 描述
             ctx.font = '14px sans-serif';
             ctx.fillStyle = '#e2e8f0';
             this.wrapText(perk.desc, cx + cardW / 2, cy + 140, cardW - 28, 20);
 
-            // 底部: 已叠加层数
             const stacks = state.perks.filter(p => p === perk.id).length;
             if (stacks > 0) {
                 ctx.font = '12px sans-serif';
@@ -190,64 +173,269 @@ export class RogueUI {
     }
 
     // ================== 战斗 HUD ==================
-    drawFightingHUD(state: RogueState, player: Player | null) {
+    drawFightingHUD(state: RogueState, player: Player | null, boss: Enemy | null) {
         const ctx = this.ctx;
 
-        // 层数
-        ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 18px sans-serif';
+        // ========== 顶部: 层数 + Boss 血条 ==========
+        // 层数徽章 (左上)
+        const badgeX = 16, badgeY = 12;
+        const badgeW = 110, badgeH = 32;
+        ctx.fillStyle = 'rgba(3, 7, 18, 0.85)';
+        ctx.strokeStyle = 'rgba(244, 114, 182, 0.6)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 6);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = '#f472b6';
+        ctx.font = 'bold 13px sans-serif';
         ctx.textAlign = 'left';
-        ctx.fillText(`第 ${state.layer} / ${state.maxLayers} 层`, 16, 28);
+        ctx.textBaseline = 'middle';
+        ctx.fillText(`LAYER ${state.layer}/${state.maxLayers}`, badgeX + 10, badgeY + badgeH / 2);
 
-        // 武器
-        ctx.font = '14px sans-serif';
-        ctx.fillStyle = '#94a3b8';
-        const weaponLabel = state.starterWeapon === 'VULCAN' ? '机枪' :
-                           state.starterWeapon === 'LASER' ? '激光' : '魔法阵';
-        ctx.fillText(`武器: ${weaponLabel}`, 16, 50);
+        // Boss 血条 (屏幕顶部中央)
+        if (boss && !boss.markedForDeletion && boss.position.y > -50) {
+            this.drawBossBar(boss);
+        }
 
-        // 血条
+        // ========== 右上: 武器图标 + 已拥有增益 ==========
+        this.drawWeaponBadge(state);
+        this.drawPerksPanel(state);
+
+        // ========== 左下: 玩家血条 / 蓝条 ==========
         if (player) {
-            const barW = 200;
-            const barH = 14;
-            const bx = 16;
-            const by = 62;
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-            ctx.fillRect(bx, by, barW, barH);
-            const ratio = Math.max(0, player.health / player.maxHealth);
-            ctx.fillStyle = ratio > 0.5 ? '#22c55e' : ratio > 0.25 ? '#f59e0b' : '#ef4444';
-            ctx.fillRect(bx, by, barW * ratio, barH);
-            ctx.strokeStyle = '#475569';
-            ctx.lineWidth = 1;
-            ctx.strokeRect(bx, by, barW, barH);
+            this.drawPlayerStatBars(player);
+        }
 
-            ctx.fillStyle = '#ffffff';
-            ctx.font = '11px sans-serif';
+        // ========== 右下: 技能 (已解锁的) ==========
+        if (player) {
+            this.drawSkillBadges(state, player);
+        }
+    }
+
+    private drawBossBar(boss: Enemy) {
+        const ctx = this.ctx;
+        const w = Math.min(520, this.width - 280); // 留空给两侧 UI
+        const h = 16;
+        const x = (this.width - w) / 2;
+        const y = 16;
+
+        // 背景
+        ctx.fillStyle = 'rgba(3, 7, 18, 0.9)';
+        ctx.strokeStyle = 'rgba(239, 68, 68, 0.7)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.roundRect(x, y, w, h, 4);
+        ctx.fill();
+        ctx.stroke();
+
+        // 血量填充
+        const ratio = Math.max(0, Math.min(1, boss.health / boss.maxHealth));
+        const grad = ctx.createLinearGradient(x, 0, x + w, 0);
+        grad.addColorStop(0, '#7f1d1d');
+        grad.addColorStop(1, '#f87171');
+        ctx.fillStyle = grad;
+        ctx.fillRect(x + 2, y + 2, (w - 4) * ratio, h - 4);
+
+        // 标题
+        ctx.fillStyle = '#fecaca';
+        ctx.font = 'bold 12px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(
+            `BOSS · ${Math.ceil(boss.health)} / ${Math.ceil(boss.maxHealth)}`,
+            x + w / 2,
+            y + h / 2
+        );
+    }
+
+    private drawWeaponBadge(state: RogueState) {
+        const ctx = this.ctx;
+        const w = 120, h = 32;
+        const x = this.width - w - 16;
+        const y = 12;
+
+        let icon = '🔫', name = 'VULCAN', color = '#facc15';
+        if (state.starterWeapon === 'LASER') { icon = '⚡'; name = 'LASER'; color = '#38bdf8'; }
+        else if (state.starterWeapon === 'MAGIC_CIRCLE') {
+            icon = '🔮'; color = '#a855f7';
+            name = state.circleElement === 'FIRE' ? 'FIRE CIRCLE' : 'ELEC CIRCLE';
+        }
+
+        ctx.fillStyle = 'rgba(3, 7, 18, 0.85)';
+        ctx.strokeStyle = color + 'aa';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.roundRect(x, y, w, h, 6);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.font = '16px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(icon, x + 8, y + h / 2);
+
+        ctx.font = 'bold 11px sans-serif';
+        ctx.fillStyle = color;
+        ctx.fillText(name, x + 32, y + h / 2);
+    }
+
+    /** 右上: 已拥有的 Perks, 按 id 聚合后显示图标 + 层数 */
+    private drawPerksPanel(state: RogueState) {
+        const ctx = this.ctx;
+        if (state.perks.length === 0) return;
+
+        // 聚合
+        const counts = new Map<PerkId, number>();
+        for (const p of state.perks) counts.set(p, (counts.get(p) || 0) + 1);
+        const lookup = new Map<PerkId, PerkDef>();
+        for (const def of PERK_POOL) lookup.set(def.id, def);
+
+        // 位置: 武器徽章下方
+        const startX = this.width - 16;
+        const startY = 52;
+        const iconSize = 28;
+        const gap = 4;
+
+        // 每行 6 个
+        const perRow = 6;
+        let idx = 0;
+        const entries = Array.from(counts.entries());
+        entries.forEach(([id, count]) => {
+            const def = lookup.get(id);
+            if (!def) return;
+            const row = Math.floor(idx / perRow);
+            const col = idx % perRow;
+            const x = startX - (col + 1) * (iconSize + gap);
+            const y = startY + row * (iconSize + gap);
+
+            // 格子底
+            ctx.fillStyle = 'rgba(3, 7, 18, 0.9)';
+            ctx.strokeStyle = def.color + 'aa';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.roundRect(x, y, iconSize, iconSize, 4);
+            ctx.fill();
+            ctx.stroke();
+
+            // 图标
+            ctx.font = '16px sans-serif';
             ctx.textAlign = 'center';
-            ctx.fillText(`${Math.ceil(player.health)} / ${player.maxHealth}`, bx + barW / 2, by + 11);
-        }
+            ctx.textBaseline = 'middle';
+            ctx.fillText(def.icon, x + iconSize / 2, y + iconSize / 2);
 
-        // Perks 数量
-        ctx.textAlign = 'right';
-        ctx.fillStyle = '#a5b4fc';
-        ctx.font = '14px sans-serif';
-        ctx.fillText(`增益 x${state.perks.length}`, this.width - 16, 28);
+            // 层数角标
+            if (count > 1) {
+                ctx.fillStyle = def.color;
+                ctx.fillRect(x + iconSize - 10, y + iconSize - 10, 10, 10);
+                ctx.fillStyle = '#000';
+                ctx.font = 'bold 9px sans-serif';
+                ctx.fillText(String(count), x + iconSize - 5, y + iconSize - 5);
+            }
+            idx++;
+        });
+    }
 
-        // 技能图标 (如果已解锁)
-        let skillY = 50;
-        ctx.textAlign = 'right';
-        ctx.font = '13px sans-serif';
-        if (state.modifiers.hasShield) {
-            ctx.fillStyle = '#3b82f6';
-            ctx.fillText('[1] 护盾', this.width - 16, skillY); skillY += 18;
-        }
-        if (state.modifiers.hasBlackhole) {
-            ctx.fillStyle = '#6366f1';
-            ctx.fillText('[2] 黑洞', this.width - 16, skillY); skillY += 18;
-        }
-        if (state.modifiers.hasShockwave) {
-            ctx.fillStyle = '#fbbf24';
-            ctx.fillText('[3] 冲击波', this.width - 16, skillY);
+    private drawPlayerStatBars(player: Player) {
+        const ctx = this.ctx;
+        const barW = 200, barH = 12;
+        const x = 16;
+        const baseY = this.height - 60;
+
+        // HP
+        this.drawStatBar(x, baseY, barW, barH,
+            player.health, player.maxHealth,
+            '#22c55e', '#166534', 'HP');
+
+        // MP
+        this.drawStatBar(x, baseY + 24, barW, barH,
+            player.mana, player.maxMana,
+            '#60a5fa', '#1e3a8a', 'MP');
+    }
+
+    private drawStatBar(x: number, y: number, w: number, h: number,
+                        value: number, max: number, c1: string, c2: string, label: string) {
+        const ctx = this.ctx;
+        const ratio = Math.max(0, Math.min(1, value / max));
+
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.roundRect(x, y, w, h, 2);
+        ctx.fill();
+        ctx.stroke();
+
+        const grad = ctx.createLinearGradient(x, 0, x + w, 0);
+        grad.addColorStop(0, c2);
+        grad.addColorStop(1, c1);
+        ctx.fillStyle = grad;
+        ctx.fillRect(x + 1, y + 1, (w - 2) * ratio, h - 2);
+
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 10px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(`${label} ${Math.ceil(value)}/${Math.floor(max)}`, x + 6, y + h / 2);
+    }
+
+    private drawSkillBadges(state: RogueState, player: Player) {
+        const ctx = this.ctx;
+        const skills: Array<{ key: 'shield' | 'blackhole' | 'shockwave'; hasFlag: boolean; icon: string; color: string; hotkey: string; name: string }> = [
+            { key: 'shield',    hasFlag: state.modifiers.hasShield,    icon: '🛡️', color: '#3b82f6', hotkey: '1', name: '护盾' },
+            { key: 'blackhole', hasFlag: state.modifiers.hasBlackhole, icon: '🌀', color: '#6366f1', hotkey: '2', name: '黑洞' },
+            { key: 'shockwave', hasFlag: state.modifiers.hasShockwave, icon: '💫', color: '#fbbf24', hotkey: '3', name: '冲击' },
+        ];
+
+        const btnSize = 44;
+        const gap = 8;
+        const startX = this.width - 16 - btnSize;
+        const startY = this.height - btnSize - 16;
+
+        let drawn = 0;
+        for (let i = skills.length - 1; i >= 0; i--) {
+            const s = skills[i];
+            if (!s.hasFlag) continue;
+            const cd = player.skills[s.key];
+            const ratio = cd.current <= 0 ? 0 : (cd.current / cd.max);
+            const isReady = cd.current <= 0;
+
+            const x = startX - drawn * (btnSize + gap);
+            const y = startY;
+            drawn++;
+
+            // 底
+            ctx.fillStyle = 'rgba(3, 7, 18, 0.9)';
+            ctx.strokeStyle = isReady ? s.color : '#444';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.roundRect(x, y, btnSize, btnSize, 8);
+            ctx.fill();
+            ctx.stroke();
+
+            // 图标
+            ctx.font = '20px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.globalAlpha = isReady ? 1 : 0.4;
+            ctx.fillText(s.icon, x + btnSize / 2, y + btnSize / 2);
+            ctx.globalAlpha = 1;
+
+            // 冷却覆盖
+            if (!isReady) {
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+                ctx.fillRect(x + 2, y + 2, btnSize - 4, (btnSize - 4) * ratio);
+                ctx.fillStyle = '#fff';
+                ctx.font = 'bold 12px sans-serif';
+                ctx.fillText(Math.ceil(cd.current).toString(), x + btnSize / 2, y + btnSize / 2);
+            }
+
+            // 快捷键角标
+            ctx.fillStyle = s.color;
+            ctx.fillRect(x + btnSize - 14, y - 2, 14, 14);
+            ctx.fillStyle = '#000';
+            ctx.font = 'bold 10px sans-serif';
+            ctx.fillText(s.hotkey, x + btnSize - 7, y + 5);
         }
     }
 
@@ -260,6 +448,7 @@ export class RogueUI {
         ctx.textAlign = 'center';
         ctx.fillStyle = victory ? '#4ade80' : '#f87171';
         ctx.font = 'bold 42px sans-serif';
+        ctx.textBaseline = 'middle';
         ctx.fillText(victory ? '通关!' : '阵亡', this.width / 2, this.height / 2 - 40);
 
         ctx.fillStyle = '#e2e8f0';

@@ -18,18 +18,23 @@ import { CircleElement, RogueModifiers } from "./RogueTypes";
  */
 
 const BASE = {
-    RADIUS: 100,        // 基础半径
-    TICK_INTERVAL: 0.5, // 每 0.5 秒 tick 一次
-    DPS_FIRE: 45,       // 火系每 tick 伤害 (= DPS_FIRE * TICK_INTERVAL 每 tick)
-    DPS_ELEC: 35,       // 电系每 tick 伤害 (单目标, 但可连锁)
-    BURN_DPS: 20,       // 火系灼烧额外 DPS (叠加在被标记的敌人上)
+    RADIUS: 220,        // 基础半径 (需要够大才能罩住屏幕顶端的 Boss)
+    TICK_INTERVAL: 0.4, // 每 0.4 秒 tick 一次
+    DPS_FIRE: 55,       // 火系每 tick 伤害
+    DPS_ELEC: 45,       // 电系每 tick 伤害 (单目标, 但可连锁)
+    BURN_DPS: 25,       // 火系灼烧额外 DPS
     CHAIN_COUNT: 3,     // 电系连锁数
-    CHAIN_RANGE: 160    // 连锁跳跃最大距离
+    CHAIN_RANGE: 200    // 连锁跳跃最大距离
 };
 
 /**
  * MagicCircle 实体: 跟随玩家, 持续对范围内敌人造成伤害.
  * 不参与碰撞系统 (radius=0), 伤害由自身 tick 逻辑处理.
+ *
+ * 按住开火键时, 法阵会激活 "活跃模式":
+ * - tick 间隔减半 (伤害加倍 DPS)
+ * - 半径稍微扩大, 有强化视觉
+ * 松开后回到待机 tick, 继续低频输出.
  */
 export class MagicCircle extends Entity {
     owner: Player;
@@ -51,6 +56,10 @@ export class MagicCircle extends Entity {
 
     // 火系爆发视觉
     burstAlpha: number = 0;
+
+    // 激活状态 (长按开火时)
+    active: boolean = false;
+    activeBlend: number = 0; // 0..1 平滑过渡
 
     constructor(owner: Player, element: CircleElement, modifiers: RogueModifiers) {
         super(owner.position.x, owner.position.y, EntityType.SKILL_SHOCKWAVE); // 借用一个 type 不影响逻辑
@@ -80,8 +89,12 @@ export class MagicCircle extends Entity {
         this.position.x = this.owner.position.x;
         this.position.y = this.owner.position.y;
 
-        // 旋转动画
-        this.rotation += dt * 1.2;
+        // 激活过渡
+        const target = this.active ? 1 : 0;
+        this.activeBlend += (target - this.activeBlend) * Math.min(1, dt * 8);
+
+        // 旋转动画 (激活时转速翻倍)
+        this.rotation += dt * (1.2 + this.activeBlend * 1.5);
         this.pulseTimer += dt;
 
         // 衰减视觉
@@ -92,13 +105,20 @@ export class MagicCircle extends Entity {
         this.tickTimer += dt;
     }
 
+    /** 外部 (RogueEngine) 每帧调用, 用来传递 "是否按住开火键" 的信息 */
+    setActive(active: boolean) {
+        this.active = active;
+    }
+
     /**
      * 由 RogueEngine 每帧调用: 检查是否到 tick 时间, 是则对范围内敌人造成伤害.
      * 返回本次 tick 命中的敌人列表 (用于外部生成粒子/飘字).
      */
     tryTick(enemies: Enemy[]): { hit: Enemy[]; damage: number; chains?: Vector2[] } | null {
-        if (this.tickTimer < this.tickInterval) return null;
-        this.tickTimer -= this.tickInterval;
+        // 激活时 tick 间隔减半 (相当于 DPS 翻倍)
+        const effectiveInterval = this.active ? this.tickInterval * 0.5 : this.tickInterval;
+        if (this.tickTimer < effectiveInterval) return null;
+        this.tickTimer -= effectiveInterval;
 
         const r2 = this.effectRadius * this.effectRadius;
         const inRange: Enemy[] = [];
@@ -180,7 +200,8 @@ export class MagicCircle extends Entity {
     // ================== 渲染 ==================
     static draw(ctx: CanvasRenderingContext2D, circle: MagicCircle) {
         const { x, y } = circle.position;
-        const r = circle.effectRadius;
+        const activeBoost = circle.activeBlend;
+        const r = circle.effectRadius * (1 + activeBoost * 0.08);
         const rot = circle.rotation;
         const isFire = circle.element === CircleElement.FIRE;
         const now = performance.now() * 0.001;
@@ -192,8 +213,11 @@ export class MagicCircle extends Entity {
         // --- 外环 ---
         ctx.save();
         ctx.rotate(rot);
-        ctx.strokeStyle = isFire ? 'rgba(251, 146, 60, 0.55)' : 'rgba(139, 92, 246, 0.55)';
-        ctx.lineWidth = 2;
+        const outerAlpha = 0.55 + activeBoost * 0.35;
+        ctx.strokeStyle = isFire
+            ? `rgba(251, 146, 60, ${outerAlpha})`
+            : `rgba(139, 92, 246, ${outerAlpha})`;
+        ctx.lineWidth = 2 + activeBoost * 2;
         ctx.beginPath();
         ctx.arc(0, 0, r, 0, Math.PI * 2);
         ctx.stroke();
