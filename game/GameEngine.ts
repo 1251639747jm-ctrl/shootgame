@@ -198,12 +198,38 @@ export class GameEngine {
       case BotKind.KAMIKAZE:
         this.entities.push(new Enemy(x, y, 1, false, EntityType.ENEMY_KAMIKAZE, { practice: true }));
         break;
-      case BotKind.BOSS:
+      case BotKind.SHIELDER:
+        this.entities.push(new Enemy(x, y, 1, false, EntityType.ENEMY_SHIELDER, { practice: true }));
+        break;
+      case BotKind.SNIPER:
+        this.entities.push(new Enemy(x, y, 1, false, EntityType.ENEMY_SNIPER, { practice: true }));
+        break;
+      case BotKind.SWARMER:
+        // 5 只一起出
+        for (let i = 0; i < 5; i++) {
+          const sx = Math.max(40, Math.min(this.width - 40, x + (i - 2) * 45));
+          this.entities.push(new Enemy(sx, y - i * 20, 1, false, EntityType.ENEMY_SWARMER, { practice: true }));
+        }
+        break;
+      case BotKind.BOSS: {
         // 只允许同时一个 Boss
         const hasBoss = this.entities.some(e => e instanceof Enemy && (e as Enemy).isBoss);
         if (hasBoss) return;
         this.entities.push(new Enemy(this.width / 2, -100, 1, true, EntityType.ENEMY_BOSS, { practice: true }));
         break;
+      }
+      case BotKind.BOSS_CARRIER: {
+        const hasBoss = this.entities.some(e => e instanceof Enemy && (e as Enemy).isBoss);
+        if (hasBoss) return;
+        this.entities.push(new Enemy(this.width / 2, -100, 1, true, EntityType.ENEMY_BOSS_CARRIER, { practice: true }));
+        break;
+      }
+      case BotKind.BOSS_REAVER: {
+        const hasBoss = this.entities.some(e => e instanceof Enemy && (e as Enemy).isBoss);
+        if (hasBoss) return;
+        this.entities.push(new Enemy(this.width / 2, -100, 1, true, EntityType.ENEMY_BOSS_REAVER, { practice: true }));
+        break;
+      }
       case BotKind.STATIC:
         // 固定靶: 放在屏幕中间偏上
         this.entities.push(new Enemy(x, this.height * 0.35, 1, false, EntityType.ENEMY_TANK, { practice: true, isStatic: true }));
@@ -386,7 +412,7 @@ export class GameEngine {
                   this.entities.push(new TeslaLightning(this.player.position, targets));
                   enemies.slice(0, 3).forEach(e => {
                       const dmg = 60 * this.player!.damageMultiplier;
-                      e.health -= dmg;
+                      e.applyDamage(dmg);
                       this.spawnFloatingText(Math.ceil(dmg).toString(), '#00ffff', e.position);
                       if(e.health <= 0) this.killEnemy(e);
                   });
@@ -512,7 +538,7 @@ export class GameEngine {
               const dist = Math.sqrt((e.position.x - entity.position.x)**2 + (e.position.y - entity.position.y)**2);
               if (dist < 150) {
                   const dmg = entity.damage * (this.player ? this.player.damageMultiplier : 1);
-                  e.health -= dmg;
+                  e.applyDamage(dmg);
                   this.spawnFloatingText(Math.ceil(dmg).toString(), '#ff0000', e.position);
                   if (e.health <= 0) this.killEnemy(e);
               }
@@ -530,7 +556,7 @@ export class GameEngine {
               const dist = Math.sqrt((e.position.x - entity.position.x)**2 + (e.position.y - entity.position.y)**2);
               if (dist < 300) {
                   const dmg = 500;
-                  e.health -= dmg;
+                  e.applyDamage(dmg);
                   this.spawnFloatingText(dmg.toString(), '#ffffff', e.position);
                   if (e.health <= 0) this.killEnemy(e);
               }
@@ -541,9 +567,9 @@ export class GameEngine {
       if (entity instanceof Enemy && !entity.isPractice) {
          if (entity.fireTimer <= 0) {
             entity.fireTimer = entity.fireRate / Math.min(this.difficultyMultiplier, 2.5);
-            
+
             if (entity.type === EntityType.ENEMY_BOSS) {
-                // BOSS PATTERN
+                // 经典 Boss: 12 方向 + 单发瞄准
                 for(let i=0; i<12; i++) {
                     const angle = (i / 12) * Math.PI * 2 + Date.now()/1000;
                     const b = new Bullet(entity.position.x, entity.position.y, false);
@@ -561,7 +587,86 @@ export class GameEngine {
                     b.radius = 12;
                     this.entities.push(b);
                 }
+            } else if (entity.type === EntityType.ENEMY_BOSS_CARRIER) {
+                // 航母 Boss: 相位切换 —— 扇形弹幕 / 放出 2 个蜂群僚机
+                entity.phaseIndex = (entity.phaseIndex + 1) % 3;
+                if (entity.phaseIndex === 2) {
+                    // 放出僚机
+                    for (let i = 0; i < 2; i++) {
+                        const sx = entity.position.x + (i === 0 ? -60 : 60);
+                        this.entities.push(new Enemy(sx, entity.position.y + 40, this.difficultyMultiplier * 0.8, false, EntityType.ENEMY_SWARMER));
+                    }
+                    this.spawnFloatingText("DEPLOY!", '#f472b6', { x: entity.position.x, y: entity.position.y - 30 });
+                } else {
+                    // 向下扇形 7 连
+                    for (let i = 0; i < 7; i++) {
+                        const spread = (i - 3) * 0.22;
+                        const b = new Bullet(entity.position.x, entity.position.y + 30, false);
+                        b.velocity.x = Math.sin(spread) * 320;
+                        b.velocity.y = Math.cos(spread) * 320;
+                        b.radius = 7;
+                        this.entities.push(b);
+                    }
+                }
+            } else if (entity.type === EntityType.ENEMY_BOSS_REAVER) {
+                // 劫掠者: 快节奏双旋弹幕 + 瞄准三连
+                const t = Date.now() / 700;
+                for (let i = 0; i < 8; i++) {
+                    const a = (i / 8) * Math.PI * 2 + t;
+                    const b1 = new Bullet(entity.position.x, entity.position.y, false);
+                    b1.velocity.x = Math.cos(a) * 240;
+                    b1.velocity.y = Math.sin(a) * 240;
+                    b1.radius = 5;
+                    this.entities.push(b1);
+                    const b2 = new Bullet(entity.position.x, entity.position.y, false);
+                    b2.velocity.x = Math.cos(-a) * 240;
+                    b2.velocity.y = Math.sin(-a) * 240;
+                    b2.radius = 5;
+                    this.entities.push(b2);
+                }
+                if (this.player) {
+                    for (let i = -1; i <= 1; i++) {
+                        const b = new Bullet(entity.position.x, entity.position.y, false);
+                        const dx = this.player.position.x - entity.position.x + i * 40;
+                        const dy = this.player.position.y - entity.position.y;
+                        const mag = Math.sqrt(dx*dx+dy*dy);
+                        b.velocity.x = (dx/mag) * 500;
+                        b.velocity.y = (dy/mag) * 500;
+                        b.radius = 8;
+                        this.entities.push(b);
+                    }
+                }
+            } else if (entity.type === EntityType.ENEMY_SNIPER) {
+                // 狙击机: 高伤慢速瞄准弹
+                if (this.player) {
+                    const b = new Bullet(entity.position.x, entity.position.y + 10, false);
+                    const dx = this.player.position.x - entity.position.x;
+                    const dy = this.player.position.y - entity.position.y;
+                    const mag = Math.sqrt(dx*dx+dy*dy) || 1;
+                    b.velocity.x = (dx/mag) * 600;
+                    b.velocity.y = (dy/mag) * 600;
+                    b.damage = 20;
+                    b.radius = 9;
+                    (b as any).color = '#34d399';
+                    this.entities.push(b);
+                }
+            } else if (entity.type === EntityType.ENEMY_SWARMER) {
+                // 蜂群: 双发小散射
+                if (this.player) {
+                    for (let i = -1; i <= 1; i += 2) {
+                        const b = new Bullet(entity.position.x, entity.position.y + 10, false);
+                        const dx = this.player.position.x - entity.position.x + i * 30;
+                        const dy = this.player.position.y - entity.position.y;
+                        const mag = Math.sqrt(dx*dx+dy*dy) || 1;
+                        b.velocity.x = (dx/mag) * 260;
+                        b.velocity.y = (dy/mag) * 260;
+                        b.radius = 4;
+                        b.damage = 6;
+                        this.entities.push(b);
+                    }
+                }
             } else {
+                // ENEMY_BASIC / FAST / TANK / SHIELDER —— 朝玩家单发
                 let vx = 0; let vy = 300;
                 if (this.player) {
                     const dx = this.player.position.x - entity.position.x;
@@ -572,6 +677,11 @@ export class GameEngine {
                 if (entity.type !== EntityType.ENEMY_KAMIKAZE) {
                     const b = new Bullet(entity.position.x, entity.position.y + 20, false);
                     b.velocity.x = vx; b.velocity.y = vy;
+                    // 盾卫: 弹更重 + 射速感
+                    if (entity.type === EntityType.ENEMY_SHIELDER) {
+                        b.radius = 8;
+                        b.damage = 12;
+                    }
                     this.entities.push(b);
                 }
             }
@@ -640,10 +750,24 @@ export class GameEngine {
 
   spawnBoss() {
       this.bossActive = true;
-      this.entities.push(new Enemy(this.width/2, -100, this.difficultyMultiplier, true));
+      // 轮换三种 Boss, 每次选一种
+      const pool = [EntityType.ENEMY_BOSS, EntityType.ENEMY_BOSS_CARRIER, EntityType.ENEMY_BOSS_REAVER];
+      const chosen = pool[Math.floor(Math.random() * pool.length)];
+      this.entities.push(new Enemy(this.width/2, -100, this.difficultyMultiplier, true, chosen));
   }
 
   spawnEnemy() {
+    // 小概率刷一波蜂群 (4~6 只)
+    if (Math.random() < 0.12) {
+      const baseX = 120 + Math.random() * (this.width - 240);
+      const count = 4 + Math.floor(Math.random() * 3);
+      for (let i = 0; i < count; i++) {
+        const sx = Math.max(30, Math.min(this.width - 30, baseX + (i - (count - 1) / 2) * 45));
+        this.entities.push(new Enemy(sx, -60 - i * 25, this.difficultyMultiplier, false, EntityType.ENEMY_SWARMER));
+      }
+      return;
+    }
+
     const x = 40 + Math.random() * (this.width - 80);
     this.entities.push(new Enemy(x, -50, this.difficultyMultiplier));
   }
@@ -679,7 +803,7 @@ export class GameEngine {
             if (Math.abs(dist - wave.radius) < 60) {
                 if (other instanceof Enemy) {
                     const dmg = 2;
-                    other.health -= dmg; 
+                    other.applyDamage(dmg);
                     this.spawnFloatingText(dmg.toString(), '#fbbf24', other.position);
                     if (other.health <= 0) this.killEnemy(other);
                 } else if (other.type === EntityType.BULLET_ENEMY) {
@@ -704,7 +828,7 @@ export class GameEngine {
                  }
                  if (dist < 40) {
                      const dmg = 5;
-                     other.health -= dmg;
+                     other.applyDamage(dmg);
                      if (other.health <= 0) this.killEnemy(other);
                  }
             } else if (other.type === EntityType.BULLET_ENEMY) {
@@ -781,7 +905,7 @@ export class GameEngine {
                 collision = true;
                 if (target instanceof Enemy) {
                     const dmg = laser.damage || 10;
-                    target.health -= dmg;
+                    target.applyDamage(dmg);
                     this.createExplosion(target.position.x + (Math.random()-0.5)*20, target.position.y, '#0ff', 1);
                     this.spawnFloatingText(Math.ceil(dmg).toString(), '#0ff', {x: target.position.x + (Math.random()-0.5)*20, y: target.position.y});
                     if (target.health <= 0) this.killEnemy(target);
@@ -798,7 +922,7 @@ export class GameEngine {
                     this.createExplosion(missile.position.x, missile.position.y, '#d946ef', 15);
                     this.entities.push(new Explosion(missile.position.x, missile.position.y));
                     const dmg = missile.damage;
-                    target.health -= dmg;
+                    target.applyDamage(dmg);
                     this.spawnFloatingText(Math.ceil(dmg).toString(), '#d946ef', target.position);
                     if (target.health <= 0) this.killEnemy(target);
                 }
@@ -833,7 +957,7 @@ export class GameEngine {
             bullet.markedForDeletion = true;
         }
 
-        enemy.health -= bullet.damage;
+        enemy.applyDamage(bullet.damage);
 
         this.createExplosion(enemy.position.x, enemy.position.y, bullet.color, 2);
         this.spawnFloatingText(Math.ceil(bullet.damage).toString(), '#facc15', enemy.position);

@@ -23,7 +23,12 @@ export enum BotKind {
   FAST,
   TANK,
   KAMIKAZE,
+  SHIELDER,
+  SNIPER,
+  SWARMER,
   BOSS,
+  BOSS_CARRIER,
+  BOSS_REAVER,
   STATIC // 靶子：不动，用来测 DPS
 }
 
@@ -33,7 +38,12 @@ export enum EntityType {
   ENEMY_FAST,
   ENEMY_TANK,
   ENEMY_KAMIKAZE,
-  ENEMY_BOSS, 
+  ENEMY_SHIELDER,
+  ENEMY_SNIPER,
+  ENEMY_SWARMER,
+  ENEMY_BOSS,
+  ENEMY_BOSS_CARRIER,
+  ENEMY_BOSS_REAVER,
   BULLET_PLAYER,
   BULLET_ENEMY,
   PARTICLE,
@@ -74,6 +84,7 @@ export interface SkillCooldown {
   max: number;
   active: boolean;
   duration?: number;
+  activeTimer?: number;
 }
 
 export interface PlayerState {

@@ -577,12 +577,17 @@ const PracticeHUD: React.FC<{
         <div className="pointer-events-auto bg-black/60 border border-white/10 rounded p-2 backdrop-blur-md">
           <div className="text-[10px] text-gray-400 mb-1.5 tracking-widest flex items-center gap-1"><Swords size={11}/> SPAWN BOTS</div>
           <div className="flex flex-wrap gap-1.5">
-            <BotButton kind={BotKind.BASIC}    label="BASIC"    color="bg-slate-800/70 border-slate-500 text-slate-100 hover:bg-slate-700" />
-            <BotButton kind={BotKind.FAST}     label="FAST"     color="bg-cyan-950/70 border-cyan-500 text-cyan-100 hover:bg-cyan-900" />
-            <BotButton kind={BotKind.TANK}     label="TANK"     color="bg-amber-950/70 border-amber-500 text-amber-100 hover:bg-amber-900" />
-            <BotButton kind={BotKind.KAMIKAZE} label="KAMIKAZE" color="bg-rose-950/70 border-rose-500 text-rose-100 hover:bg-rose-900" />
-            <BotButton kind={BotKind.BOSS}     label="BOSS"     color="bg-fuchsia-950/70 border-fuchsia-500 text-fuchsia-100 hover:bg-fuchsia-900" />
-            <BotButton kind={BotKind.STATIC}   label="STATIC"   color="bg-emerald-950/70 border-emerald-500 text-emerald-100 hover:bg-emerald-900" />
+            <BotButton kind={BotKind.BASIC}        label="BASIC"    color="bg-slate-800/70 border-slate-500 text-slate-100 hover:bg-slate-700" />
+            <BotButton kind={BotKind.FAST}         label="FAST"     color="bg-cyan-950/70 border-cyan-500 text-cyan-100 hover:bg-cyan-900" />
+            <BotButton kind={BotKind.TANK}         label="TANK"     color="bg-amber-950/70 border-amber-500 text-amber-100 hover:bg-amber-900" />
+            <BotButton kind={BotKind.KAMIKAZE}     label="KAMIKAZE" color="bg-rose-950/70 border-rose-500 text-rose-100 hover:bg-rose-900" />
+            <BotButton kind={BotKind.SHIELDER}     label="SHIELDER" color="bg-sky-950/70 border-sky-500 text-sky-100 hover:bg-sky-900" />
+            <BotButton kind={BotKind.SNIPER}       label="SNIPER"   color="bg-green-950/70 border-green-500 text-green-100 hover:bg-green-900" />
+            <BotButton kind={BotKind.SWARMER}      label="SWARMER×5" color="bg-yellow-950/70 border-yellow-500 text-yellow-100 hover:bg-yellow-900" />
+            <BotButton kind={BotKind.BOSS}         label="BOSS"     color="bg-fuchsia-950/70 border-fuchsia-500 text-fuchsia-100 hover:bg-fuchsia-900" />
+            <BotButton kind={BotKind.BOSS_CARRIER} label="CARRIER"  color="bg-pink-950/70 border-pink-500 text-pink-100 hover:bg-pink-900" />
+            <BotButton kind={BotKind.BOSS_REAVER}  label="REAVER"   color="bg-red-950/70 border-red-500 text-red-100 hover:bg-red-900" />
+            <BotButton kind={BotKind.STATIC}       label="STATIC"   color="bg-emerald-950/70 border-emerald-500 text-emerald-100 hover:bg-emerald-900" />
             <button
               {...clearProps}
               data-ui-button="practice-clear"

@@ -158,6 +158,20 @@ export class Enemy extends Entity {
     isPractice: boolean = false; // 练习场靶: 进顶后悬停, 不射击
     isStatic: boolean = false;   // 完全不动的靶子
 
+    // 前向护盾 (ENEMY_SHIELDER 使用, 其他可选)
+    shieldHealth: number = 0;
+    maxShieldHealth: number = 0;
+    shieldRegenDelay: number = 0; // 被击中后多少秒才开始恢复
+    shieldFlashTimer: number = 0;  // 刚被打中的发光效果
+
+    // 狙击机特有: 开火前的预瞄激光指示
+    aimTimer: number = 0;          // 持续瞄准时间
+    isAiming: boolean = false;
+
+    // Boss 阶段相位计时: 用于复杂 Boss 弹幕模式切换
+    phaseTimer: number = 0;
+    phaseIndex: number = 0;
+
     constructor(
         x: number,
         y: number,
@@ -173,24 +187,47 @@ export class Enemy extends Entity {
         } else if (isBoss) {
             type = EntityType.ENEMY_BOSS;
         } else {
+            // 常规敌人抽签 (加入 3 种新型)
             const roll = Math.random();
-            if (roll < 0.15) type = EntityType.ENEMY_TANK;
-            else if (roll < 0.4) type = EntityType.ENEMY_FAST;
-            else if (roll < 0.55) type = EntityType.ENEMY_KAMIKAZE;
-            else type = EntityType.ENEMY_BASIC;
+            if (roll < 0.10)      type = EntityType.ENEMY_TANK;
+            else if (roll < 0.28) type = EntityType.ENEMY_FAST;
+            else if (roll < 0.40) type = EntityType.ENEMY_KAMIKAZE;
+            else if (roll < 0.50) type = EntityType.ENEMY_SHIELDER;
+            else if (roll < 0.60) type = EntityType.ENEMY_SNIPER;
+            else if (roll < 0.72) type = EntityType.ENEMY_SWARMER;
+            else                  type = EntityType.ENEMY_BASIC;
         }
 
         super(x, y, type);
-        this.isBoss = type === EntityType.ENEMY_BOSS;
+        this.isBoss = (
+            type === EntityType.ENEMY_BOSS ||
+            type === EntityType.ENEMY_BOSS_CARRIER ||
+            type === EntityType.ENEMY_BOSS_REAVER
+        );
         this.isPractice = !!opts?.practice;
         this.isStatic = !!opts?.isStatic;
 
-        if (this.isBoss) {
+        if (type === EntityType.ENEMY_BOSS) {
+            // 旗舰 BOSS: 均衡高血量
             this.radius = 100;
             this.health = 4000 * difficulty;
             this.scoreValue = 1500;
             this.fireRate = 1.2;
             this.speed = 40;
+        } else if (type === EntityType.ENEMY_BOSS_CARRIER) {
+            // 航母 BOSS: 高血量, 放出小僚机, 射速慢
+            this.radius = 110;
+            this.health = 5200 * difficulty;
+            this.scoreValue = 2200;
+            this.fireRate = 1.6;
+            this.speed = 35;
+        } else if (type === EntityType.ENEMY_BOSS_REAVER) {
+            // 劫掠者 BOSS: 中血量, 敏捷, 高频弹幕 + 激光扫射
+            this.radius = 85;
+            this.health = 3400 * difficulty;
+            this.scoreValue = 2000;
+            this.fireRate = 0.9;
+            this.speed = 70;
         } else if (type === EntityType.ENEMY_TANK) {
             this.radius = 32;
             this.health = 300 * difficulty;
@@ -209,6 +246,29 @@ export class Enemy extends Entity {
             this.scoreValue = 100;
             this.fireRate = 999; // doesn't fire
             this.speed = 320;
+        } else if (type === EntityType.ENEMY_SHIELDER) {
+            // 盾卫: 正面护盾, 需绕后或耗盾才能击穿
+            this.radius = 30;
+            this.health = 180 * difficulty;
+            this.scoreValue = 180;
+            this.fireRate = 2.6;
+            this.speed = 80;
+            this.shieldHealth = 250 * difficulty;
+            this.maxShieldHealth = this.shieldHealth;
+        } else if (type === EntityType.ENEMY_SNIPER) {
+            // 狙击机: 远距离悬停, 预瞄后高伤慢速弹
+            this.radius = 22;
+            this.health = 100 * difficulty;
+            this.scoreValue = 140;
+            this.fireRate = 3.0; // 整体节奏慢
+            this.speed = 60;
+        } else if (type === EntityType.ENEMY_SWARMER) {
+            // 蜂群个体: 血薄, 正弦蛇形走位, 散射小弹
+            this.radius = 14;
+            this.health = 35 * difficulty;
+            this.scoreValue = 40;
+            this.fireRate = 2.0;
+            this.speed = 180;
         } else {
             this.radius = 24;
             this.health = 120 * difficulty;
@@ -220,6 +280,10 @@ export class Enemy extends Entity {
         // 练习场里敌人血量翻 3 倍, 方便测试 DPS
         if (this.isPractice) {
             this.health *= 3;
+            if (this.shieldHealth > 0) {
+                this.shieldHealth *= 3;
+                this.maxShieldHealth = this.shieldHealth;
+            }
             // 不开火
             this.fireRate = 1e9;
         }
@@ -232,6 +296,20 @@ export class Enemy extends Entity {
     }
 
     update(dt: number, playerPos?: Vector2) {
+        // 共用状态衰减
+        if (this.shieldFlashTimer > 0) this.shieldFlashTimer -= dt;
+        if (this.shieldRegenDelay > 0) this.shieldRegenDelay -= dt;
+        // 盾再生 (仅盾卫)
+        if (this.type === EntityType.ENEMY_SHIELDER &&
+            this.maxShieldHealth > 0 &&
+            this.shieldHealth < this.maxShieldHealth &&
+            this.shieldRegenDelay <= 0) {
+            this.shieldHealth = Math.min(
+                this.maxShieldHealth,
+                this.shieldHealth + this.maxShieldHealth * 0.15 * dt
+            );
+        }
+
         if (this.isStatic) {
             // 固定靶: 完全不动
             this.fireTimer -= dt;
@@ -257,16 +335,20 @@ export class Enemy extends Entity {
             return;
         }
 
-        // Boss hovers at top
+        // Boss hovers at top (所有 Boss 变体都在顶端悬停)
         if (this.isBoss) {
             const targetY = 120;
             if (this.position.y < targetY) {
                 this.velocity.y = 60;
             } else {
                 this.velocity.y = 0;
-                // side-to-side drift
-                this.velocity.x = Math.sin(performance.now() / 1200) * 80;
+                // 不同 Boss 的巡航速度
+                let drift = 80;
+                if (this.type === EntityType.ENEMY_BOSS_REAVER) drift = 160;
+                if (this.type === EntityType.ENEMY_BOSS_CARRIER) drift = 50;
+                this.velocity.x = Math.sin(performance.now() / 1200) * drift;
             }
+            this.phaseTimer += dt;
         } else if (this.type === EntityType.ENEMY_KAMIKAZE && playerPos) {
             // homing
             const dx = playerPos.x - this.position.x;
@@ -274,6 +356,24 @@ export class Enemy extends Entity {
             const d = Math.sqrt(dx * dx + dy * dy) || 1;
             this.velocity.x = (dx / d) * this.speed;
             this.velocity.y = (dy / d) * this.speed;
+        } else if (this.type === EntityType.ENEMY_SHIELDER) {
+            // 盾卫: 慢速推进, 轻微摇摆, 正面朝下
+            this.velocity.y = this.speed;
+            this.velocity.x = Math.sin(performance.now() / 800 + this.position.x * 0.02) * 30;
+        } else if (this.type === EntityType.ENEMY_SNIPER) {
+            // 狙击机: 进入屏幕上 1/3 后悬停
+            const targetY = 160 + (this.position.x % 5) * 15;
+            if (this.position.y < targetY) {
+                this.velocity.y = this.speed;
+                this.velocity.x = 0;
+            } else {
+                this.velocity.y = 0;
+                this.velocity.x = Math.sin(performance.now() / 2200 + this.position.x * 0.01) * 40;
+            }
+        } else if (this.type === EntityType.ENEMY_SWARMER) {
+            // 蜂群个体: 正弦蛇形走位
+            this.velocity.y = this.speed;
+            this.velocity.x = Math.sin(performance.now() / 400 + this.position.x * 0.05) * 150;
         }
 
         this.position.x += this.velocity.x * dt;
@@ -281,8 +381,37 @@ export class Enemy extends Entity {
 
         this.fireTimer -= dt;
 
+        // 狙击机: 开火前 0.8s 起预瞄激光
+        if (this.type === EntityType.ENEMY_SNIPER) {
+            this.isAiming = this.fireTimer > 0 && this.fireTimer < 0.8;
+        }
+
         // face the player roughly (pointing down by default)
-        this.rotation += dt * 0.5;
+        // 盾卫/狙击/蜂群保持朝下不自转, 更有“阵型”感
+        if (this.type !== EntityType.ENEMY_SHIELDER &&
+            this.type !== EntityType.ENEMY_SNIPER &&
+            this.type !== EntityType.ENEMY_SWARMER) {
+            this.rotation += dt * 0.5;
+        }
+    }
+
+    /**
+     * 统一的伤害入口: 处理护盾吸收, 返回实际扣到本体的伤害
+     */
+    applyDamage(amount: number): number {
+        if (this.shieldHealth > 0) {
+            const absorbed = Math.min(this.shieldHealth, amount);
+            this.shieldHealth -= absorbed;
+            this.shieldRegenDelay = 2.5;
+            this.shieldFlashTimer = 0.15;
+            const leftover = amount - absorbed;
+            if (leftover > 0) {
+                this.health -= leftover;
+            }
+            return leftover;
+        }
+        this.health -= amount;
+        return amount;
     }
 }
 
