@@ -61,6 +61,8 @@ export class Player extends Entity {
     isCharging: boolean = false;
 
     shieldActive: boolean = false; // used by PlayerModel
+    invincible: boolean = false;   // 练习场无敌
+    unlimitedMana: boolean = false;// 练习场魔法无限
 
     skills: {
         shield: SkillCooldown;
@@ -121,6 +123,13 @@ export class Player extends Entity {
         this.isCharging = false;
     }
 
+    selectWeapon(w: WeaponType) {
+        if (this.weaponOrder.indexOf(w) === -1) return;
+        this.currentWeapon = w;
+        this.chargeLevel = 0;
+        this.isCharging = false;
+    }
+
     gainXp(amount: number) {
         this.xp += amount;
         while (this.xp >= this.xpToNext) {
@@ -146,24 +155,37 @@ export class Enemy extends Entity {
     fireTimer: number;
     fireRate: number;
     speed: number;
+    isPractice: boolean = false; // 练习场靶: 进顶后悬停, 不射击
+    isStatic: boolean = false;   // 完全不动的靶子
 
-    constructor(x: number, y: number, difficulty: number = 1, isBoss: boolean = false) {
+    constructor(
+        x: number,
+        y: number,
+        difficulty: number = 1,
+        isBoss: boolean = false,
+        forcedType?: EntityType,
+        opts?: { practice?: boolean; isStatic?: boolean }
+    ) {
         // pick enemy type
         let type = EntityType.ENEMY_BASIC;
-        if (!isBoss) {
+        if (forcedType !== undefined) {
+            type = forcedType;
+        } else if (isBoss) {
+            type = EntityType.ENEMY_BOSS;
+        } else {
             const roll = Math.random();
             if (roll < 0.15) type = EntityType.ENEMY_TANK;
             else if (roll < 0.4) type = EntityType.ENEMY_FAST;
             else if (roll < 0.55) type = EntityType.ENEMY_KAMIKAZE;
             else type = EntityType.ENEMY_BASIC;
-        } else {
-            type = EntityType.ENEMY_BOSS;
         }
 
         super(x, y, type);
-        this.isBoss = isBoss;
+        this.isBoss = type === EntityType.ENEMY_BOSS;
+        this.isPractice = !!opts?.practice;
+        this.isStatic = !!opts?.isStatic;
 
-        if (isBoss) {
+        if (this.isBoss) {
             this.radius = 100;
             this.health = 4000 * difficulty;
             this.scoreValue = 1500;
@@ -195,13 +217,46 @@ export class Enemy extends Entity {
             this.speed = 120;
         }
 
+        // 练习场里敌人血量翻 3 倍, 方便测试 DPS
+        if (this.isPractice) {
+            this.health *= 3;
+            // 不开火
+            this.fireRate = 1e9;
+        }
+
         this.maxHealth = this.health;
         this.fireTimer = this.fireRate * (0.5 + Math.random() * 0.5);
         // initial downward velocity
         this.velocity.y = this.speed;
+        if (this.isStatic) this.velocity.y = 0;
     }
 
     update(dt: number, playerPos?: Vector2) {
+        if (this.isStatic) {
+            // 固定靶: 完全不动
+            this.fireTimer -= dt;
+            this.rotation += dt * 0.3;
+            return;
+        }
+
+        // 练习场: 进顶后悬停, 不冲撞玩家
+        if (this.isPractice) {
+            const targetY = this.isBoss ? 150 : 180 + (this.position.x % 7) * 15;
+            if (this.position.y < targetY) {
+                this.velocity.y = this.speed * 0.6;
+                this.velocity.x = 0;
+            } else {
+                this.velocity.y = 0;
+                // 轻微左右漂移, 区分非静态靶
+                this.velocity.x = Math.sin(performance.now() / 1500 + this.position.x * 0.01) * 40;
+            }
+            this.position.x += this.velocity.x * dt;
+            this.position.y += this.velocity.y * dt;
+            this.fireTimer -= dt;
+            this.rotation += dt * 0.5;
+            return;
+        }
+
         // Boss hovers at top
         if (this.isBoss) {
             const targetY = 120;

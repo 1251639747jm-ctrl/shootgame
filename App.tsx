@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { GameCanvas } from './components/GameCanvas';
-import { GameState, WeaponType, GameRef, PlayerState, GameSettings } from './types';
-import { Rocket, Trophy, Heart, Crosshair, Zap, Disc, Hexagon, Shield, CircleDot, Activity, Bomb, Settings, X, Waves, Crosshair as Scope } from 'lucide-react';
+import { GameState, WeaponType, GameRef, PlayerState, GameSettings, BotKind } from './types';
+import { Rocket, Trophy, Heart, Crosshair, Zap, Disc, Hexagon, Shield, CircleDot, Activity, Bomb, Settings, X, Waves, Crosshair as Scope, Target, LogOut, Trash2, Swords } from 'lucide-react';
 
 /**
  * 专门用于手机按钮的 Hook / HOC：
@@ -77,7 +77,7 @@ const App: React.FC = () => {
   const gameRef = useRef<GameRef>(null);
 
   useEffect(() => {
-    if (gameState !== GameState.PLAYING) return;
+    if (gameState !== GameState.PLAYING && gameState !== GameState.PRACTICE) return;
     const interval = setInterval(() => {
       if (gameRef.current) {
         const s = gameRef.current.getPlayerState();
@@ -96,6 +96,18 @@ const App: React.FC = () => {
     setGameState(GameState.PLAYING);
     setScore(0);
     setHealth(100);
+    setPlayerState(null);
+  };
+
+  const handleStartPractice = () => {
+    setGameState(GameState.PRACTICE);
+    setScore(0);
+    setHealth(100);
+    setPlayerState(null);
+  };
+
+  const handleExitPractice = () => {
+    setGameState(GameState.MENU);
     setPlayerState(null);
   };
 
@@ -370,6 +382,17 @@ const App: React.FC = () => {
         </>
       )}
 
+      {gameState === GameState.PRACTICE && (
+        <PracticeHUD
+          gameRef={gameRef}
+          playerState={playerState}
+          joystick={joystick}
+          currentWeapon={currentWeapon}
+          onExit={handleExitPractice}
+          useUIButtonProps={useUIButtonProps}
+        />
+      )}
+
       {gameState === GameState.MENU && (
         <div className="absolute inset-0 flex flex-col items-center justify-center z-10 bg-black/80 backdrop-blur-sm">
           <div className="mb-12 text-center animate-pulse relative">
@@ -392,10 +415,21 @@ const App: React.FC = () => {
               </span>
             </button>
 
+            <button
+              onClick={handleStartPractice}
+              className="group relative px-8 py-4 bg-violet-950/40 hover:bg-violet-800/60 border border-violet-500/50 text-violet-100 font-bold tracking-widest transition-all duration-200 hover:scale-105 active:scale-95 overflow-hidden"
+            >
+              <span className="flex items-center justify-center gap-2 relative z-10">
+                <Target className="text-violet-300" />
+                PRACTICE RANGE
+              </span>
+            </button>
+
             <div className="text-center text-xs text-gray-400 mt-4 space-y-1 font-sans border-t border-white/10 pt-4">
               <p>📱 <span className="text-cyan-300">Mobile:</span> 左半屏拖动 = 移动 · 右半屏按住 = 开火</p>
               <p className="hidden md:block">🖥️ <span className="text-cyan-300">Desktop:</span> WASD 移动 · 鼠标/空格 开火</p>
               <p>技能：按屏幕右下方按钮 / 键盘 1 2 3</p>
+              <p className="text-violet-300/80">试验场: 无敌 · 魔法无限 · 任选武器 · 放置 Bot 练手感</p>
             </div>
           </div>
         </div>
@@ -428,3 +462,213 @@ const App: React.FC = () => {
 };
 
 export default App;
+
+// ============== 练习场 HUD ==============
+type UseUIBtnPropsFn = (
+  gameRef: React.RefObject<GameRef>,
+  onPress: () => void,
+  opts?: { disabled?: boolean }
+) => any;
+
+const PracticeHUD: React.FC<{
+  gameRef: React.RefObject<GameRef>;
+  playerState: PlayerState | null;
+  joystick: { active: boolean; base: { x: number; y: number }; knob: { x: number; y: number } };
+  currentWeapon: WeaponType;
+  onExit: () => void;
+  useUIButtonProps: UseUIBtnPropsFn;
+}> = ({ gameRef, playerState, joystick, currentWeapon, onExit, useUIButtonProps }) => {
+
+  // Bot 生成按钮
+  const BotButton: React.FC<{ kind: BotKind; label: string; color: string; }> = ({ kind, label, color }) => {
+    const btnProps = useUIButtonProps(gameRef, () => gameRef.current?.spawnPracticeBot(kind));
+    return (
+      <button
+        {...btnProps}
+        data-ui-button="practice-bot"
+        style={{ touchAction: 'none' }}
+        className={`px-3 py-2 rounded border text-[11px] font-bold tracking-wider backdrop-blur-md active:scale-95 transition ${color}`}
+      >
+        {label}
+      </button>
+    );
+  };
+
+  // 武器选择按钮 (直接跳到某武器, 不是循环切换)
+  const WeapChip: React.FC<{ w: WeaponType; label: string; active: boolean }> = ({ w, label, active }) => {
+    const btnProps = useUIButtonProps(gameRef, () => gameRef.current?.selectWeapon(w));
+    return (
+      <button
+        {...btnProps}
+        data-ui-button="practice-weap"
+        style={{ touchAction: 'none' }}
+        className={`px-2.5 py-1.5 rounded text-[10px] font-bold tracking-wider backdrop-blur-md border active:scale-95 transition ${
+          active
+            ? 'bg-violet-600/60 border-violet-300 text-white'
+            : 'bg-black/60 border-white/10 text-gray-300 hover:bg-white/10'
+        }`}
+      >
+        {label}
+      </button>
+    );
+  };
+
+  const clearProps  = useUIButtonProps(gameRef, () => gameRef.current?.clearPracticeBots());
+  const exitProps   = useUIButtonProps(gameRef, onExit);
+
+  // 技能按钮 (复用视觉但冷却永远是0)
+  const SkillBtn: React.FC<{ index: number; icon: React.ReactNode; color: string; }> = ({ index, icon, color }) => {
+    const btnProps = useUIButtonProps(gameRef, () => gameRef.current?.triggerSkill(index));
+    return (
+      <button
+        {...btnProps}
+        data-ui-button="skill"
+        className="relative flex flex-col items-center justify-center w-16 h-16 rounded overflow-hidden transition-all active:scale-95 border"
+        style={{
+          backgroundColor: 'rgba(10, 20, 40, 0.8)',
+          borderColor: 'rgba(255,255,255,0.4)',
+          borderWidth: '1px',
+          touchAction: 'none'
+        }}
+      >
+        <div className={color}>{icon}</div>
+        <span className="text-[10px] mt-1 font-bold text-white">{index}</span>
+      </button>
+    );
+  };
+
+  // 换武器按钮
+  const WeapCycleBtn: React.FC = () => {
+    const btnProps = useUIButtonProps(gameRef, () => gameRef.current?.switchWeapon());
+    return (
+      <button
+        {...btnProps}
+        data-ui-button="weapon"
+        style={{ touchAction: 'none' }}
+        className="flex flex-col items-center justify-center w-24 h-24 bg-black/60 border-2 border-violet-400/50 rounded-lg backdrop-blur-md active:scale-95 transition"
+      >
+        <WeaponIcon w={currentWeapon} />
+        <span className="text-[10px] text-violet-100 font-bold tracking-widest mt-1">{weaponName(currentWeapon)}</span>
+      </button>
+    );
+  };
+
+  return (
+    <>
+      {/* 顶部工具栏 */}
+      <div className="absolute top-0 left-0 w-full p-3 z-20 flex flex-col gap-2 pointer-events-none">
+        <div className="flex items-center justify-between gap-2 pointer-events-auto">
+          <div className="flex items-center gap-2 text-violet-300 bg-black/70 px-3 py-1.5 rounded border border-violet-500/40 backdrop-blur-md">
+            <Target size={16} />
+            <span className="text-[11px] font-bold tracking-[0.2em]">PRACTICE RANGE</span>
+          </div>
+          <button
+            {...exitProps}
+            data-ui-button="practice-exit"
+            style={{ touchAction: 'none' }}
+            className="flex items-center gap-1 px-3 py-1.5 rounded border border-red-500/50 bg-red-950/40 hover:bg-red-900/60 text-red-100 text-[11px] font-bold tracking-wider active:scale-95 transition"
+          >
+            <LogOut size={14} />
+            EXIT
+          </button>
+        </div>
+
+        {/* Bot 生成区 */}
+        <div className="pointer-events-auto bg-black/60 border border-white/10 rounded p-2 backdrop-blur-md">
+          <div className="text-[10px] text-gray-400 mb-1.5 tracking-widest flex items-center gap-1"><Swords size={11}/> SPAWN BOTS</div>
+          <div className="flex flex-wrap gap-1.5">
+            <BotButton kind={BotKind.BASIC}    label="BASIC"    color="bg-slate-800/70 border-slate-500 text-slate-100 hover:bg-slate-700" />
+            <BotButton kind={BotKind.FAST}     label="FAST"     color="bg-cyan-950/70 border-cyan-500 text-cyan-100 hover:bg-cyan-900" />
+            <BotButton kind={BotKind.TANK}     label="TANK"     color="bg-amber-950/70 border-amber-500 text-amber-100 hover:bg-amber-900" />
+            <BotButton kind={BotKind.KAMIKAZE} label="KAMIKAZE" color="bg-rose-950/70 border-rose-500 text-rose-100 hover:bg-rose-900" />
+            <BotButton kind={BotKind.BOSS}     label="BOSS"     color="bg-fuchsia-950/70 border-fuchsia-500 text-fuchsia-100 hover:bg-fuchsia-900" />
+            <BotButton kind={BotKind.STATIC}   label="STATIC"   color="bg-emerald-950/70 border-emerald-500 text-emerald-100 hover:bg-emerald-900" />
+            <button
+              {...clearProps}
+              data-ui-button="practice-clear"
+              style={{ touchAction: 'none' }}
+              className="px-3 py-2 rounded border text-[11px] font-bold tracking-wider backdrop-blur-md active:scale-95 transition bg-red-950/60 border-red-500 text-red-100 hover:bg-red-900 ml-auto flex items-center gap-1"
+            >
+              <Trash2 size={12} /> CLEAR
+            </button>
+          </div>
+        </div>
+
+        {/* 武器选择区 */}
+        <div className="pointer-events-auto bg-black/60 border border-white/10 rounded p-2 backdrop-blur-md">
+          <div className="text-[10px] text-gray-400 mb-1.5 tracking-widest">WEAPONS</div>
+          <div className="flex flex-wrap gap-1.5">
+            <WeapChip w={WeaponType.VULCAN}  label="VULCAN"   active={currentWeapon === WeaponType.VULCAN} />
+            <WeapChip w={WeaponType.SPREAD}  label="SPREAD"   active={currentWeapon === WeaponType.SPREAD} />
+            <WeapChip w={WeaponType.LASER}   label="LASER"    active={currentWeapon === WeaponType.LASER} />
+            <WeapChip w={WeaponType.RAILGUN} label="RAILGUN"  active={currentWeapon === WeaponType.RAILGUN} />
+            <WeapChip w={WeaponType.PLASMA}  label="MISSILE"  active={currentWeapon === WeaponType.PLASMA} />
+            <WeapChip w={WeaponType.TESLA}   label="TESLA"    active={currentWeapon === WeaponType.TESLA} />
+            <WeapChip w={WeaponType.BOMB}    label="BOMB"     active={currentWeapon === WeaponType.BOMB} />
+          </div>
+        </div>
+      </div>
+
+      {/* 摇杆 */}
+      {joystick.active && (
+        <>
+          <div
+            className="pointer-events-none absolute rounded-full border-2 border-cyan-300/60 bg-cyan-400/10"
+            style={{ width: 140, height: 140, left: joystick.base.x - 70, top: joystick.base.y - 70 }}
+          />
+          <div
+            className="pointer-events-none absolute rounded-full bg-cyan-300/70 border border-white/80 shadow-[0_0_18px_rgba(0,255,255,0.6)]"
+            style={{ width: 56, height: 56, left: joystick.knob.x - 28, top: joystick.knob.y - 28 }}
+          />
+        </>
+      )}
+
+      {/* 操作提示 */}
+      <div className="absolute bottom-2 left-4 z-10 text-[10px] text-cyan-200/40 font-bold tracking-widest pointer-events-none">
+        LEFT HALF · MOVE
+      </div>
+      <div className="absolute bottom-2 right-4 z-10 text-[10px] text-rose-200/40 font-bold tracking-widest pointer-events-none">
+        RIGHT HALF · FIRE
+      </div>
+
+      {/* 技能 */}
+      <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex gap-4 z-20">
+        <SkillBtn index={1} icon={<Shield size={24} />}    color="text-blue-400" />
+        <SkillBtn index={2} icon={<CircleDot size={24} />} color="text-indigo-400" />
+        <SkillBtn index={3} icon={<Activity size={24} />}  color="text-yellow-400" />
+      </div>
+
+      {/* 换武器 */}
+      <div className="absolute bottom-8 right-4 z-20">
+        <WeapCycleBtn />
+      </div>
+    </>
+  );
+};
+
+// 武器图标/名字小工具 (和 App 里一致, 这里独立一份方便 PracticeHUD 使用)
+const WeaponIcon: React.FC<{ w: WeaponType }> = ({ w }) => {
+  switch (w) {
+    case WeaponType.LASER:   return <Zap size={24} className="text-cyan-400" />;
+    case WeaponType.PLASMA:  return <Disc size={24} className="text-fuchsia-400" />;
+    case WeaponType.TESLA:   return <Activity size={24} className="text-blue-200" />;
+    case WeaponType.BOMB:    return <Bomb size={24} className="text-red-400" />;
+    case WeaponType.RAILGUN: return <Scope size={24} className="text-violet-300" />;
+    case WeaponType.SPREAD:  return <Waves size={24} className="text-orange-400" />;
+    case WeaponType.VULCAN:
+    default:                 return <Hexagon size={24} className="text-yellow-400" />;
+  }
+};
+
+function weaponName(w: WeaponType) {
+  switch (w) {
+    case WeaponType.LASER:   return "HYPER BEAM";
+    case WeaponType.PLASMA:  return "TRACKING MSL";
+    case WeaponType.TESLA:   return "TESLA COIL";
+    case WeaponType.BOMB:    return "DOOM BOMB";
+    case WeaponType.RAILGUN: return "RAILGUN";
+    case WeaponType.SPREAD:  return "SCATTER GUN";
+    case WeaponType.VULCAN:  return "VULCAN CANNON";
+    default:                 return "";
+  }
+}

@@ -6,7 +6,7 @@ import { Bomb, Explosion } from "./Bomb";
 import { Missile } from "./Missile";
 import { InputManager } from "./InputManager";
 import { Renderer } from "./Renderer";
-import { GameState, EntityType, GameConfig, WeaponType, ItemType, PlayerState, Vector2, GameSettings } from "../types";
+import { GameState, EntityType, GameConfig, WeaponType, ItemType, PlayerState, Vector2, GameSettings, BotKind } from "../types";
 
 export class GameEngine {
   canvas: HTMLCanvasElement;
@@ -99,14 +99,14 @@ export class GameEngine {
   }
 
   startMenuAnimation() {
-    if (this.state === GameState.PLAYING) return;
+    if (this.state === GameState.PLAYING || this.state === GameState.PRACTICE) return;
     this.state = GameState.MENU;
     this.lastTime = performance.now();
     requestAnimationFrame(this.menuLoop.bind(this));
   }
 
   menuLoop(timestamp: number) {
-    if (this.state === GameState.PLAYING) return;
+    if (this.state === GameState.PLAYING || this.state === GameState.PRACTICE) return;
 
     const dt = Math.min((timestamp - this.lastTime) / 1000, 0.1);
     this.lastTime = timestamp;
@@ -151,6 +151,78 @@ export class GameEngine {
     this.lastTime = performance.now();
     requestAnimationFrame(this.loop.bind(this));
   }
+
+  // ================== 武器试验场 ==================
+  startPractice() {
+    this.entities = [];
+    this.player = new Player(this.width / 2, this.height - 120);
+    this.player.invincible = true;
+    this.player.unlimitedMana = true;
+    this.player.level = 3;                 // 给点等级, 散弹/Vulcan 多几发
+    this.player.damageMultiplier = 1;
+    this.entities.push(this.player);
+    this.score = 0;
+    this.bossActive = false;
+    this.state = GameState.PRACTICE;
+    this.onScoreChange(0);
+    this.onHealthChange(this.player.health);
+    this.onWeaponChange(this.player.currentWeapon);
+    this.lastTime = performance.now();
+    requestAnimationFrame(this.loop.bind(this));
+  }
+
+  stopPractice() {
+    // 回到菜单背景动画
+    this.state = GameState.MENU;
+    this.entities = [];
+    this.player = null;
+    this.lastTime = performance.now();
+    requestAnimationFrame(this.menuLoop.bind(this));
+  }
+
+  spawnPracticeBot(kind: BotKind) {
+    if (this.state !== GameState.PRACTICE) return;
+    const x = 80 + Math.random() * (this.width - 160);
+    const y = -60;
+
+    switch (kind) {
+      case BotKind.BASIC:
+        this.entities.push(new Enemy(x, y, 1, false, EntityType.ENEMY_BASIC, { practice: true }));
+        break;
+      case BotKind.FAST:
+        this.entities.push(new Enemy(x, y, 1, false, EntityType.ENEMY_FAST, { practice: true }));
+        break;
+      case BotKind.TANK:
+        this.entities.push(new Enemy(x, y, 1, false, EntityType.ENEMY_TANK, { practice: true }));
+        break;
+      case BotKind.KAMIKAZE:
+        this.entities.push(new Enemy(x, y, 1, false, EntityType.ENEMY_KAMIKAZE, { practice: true }));
+        break;
+      case BotKind.BOSS:
+        // 只允许同时一个 Boss
+        const hasBoss = this.entities.some(e => e instanceof Enemy && (e as Enemy).isBoss);
+        if (hasBoss) return;
+        this.entities.push(new Enemy(this.width / 2, -100, 1, true, EntityType.ENEMY_BOSS, { practice: true }));
+        break;
+      case BotKind.STATIC:
+        // 固定靶: 放在屏幕中间偏上
+        this.entities.push(new Enemy(x, this.height * 0.35, 1, false, EntityType.ENEMY_TANK, { practice: true, isStatic: true }));
+        break;
+    }
+  }
+
+  clearPracticeBots() {
+    this.entities.forEach(e => {
+      if (e instanceof Enemy) e.markedForDeletion = true;
+    });
+  }
+
+  selectWeapon(w: WeaponType) {
+    if (!this.player || this.player.markedForDeletion) return;
+    this.player.selectWeapon(w);
+    this.onWeaponChange(this.player.currentWeapon);
+  }
+  // ================================================
   
   triggerWeaponSwitch() {
     if (this.player && !this.player.markedForDeletion) {
@@ -162,9 +234,10 @@ export class GameEngine {
   triggerSkill(index: number) {
       if (!this.player || this.player.markedForDeletion) return;
       const p = this.player;
-      
-      if (index === 1 && p.skills.shield.current <= 0 && p.mana >= 40) {
-          p.mana -= 40;
+      const freeCost = p.unlimitedMana;
+
+      if (index === 1 && p.skills.shield.current <= 0 && (freeCost || p.mana >= 40)) {
+          if (!freeCost) p.mana -= 40;
           p.skills.shield.current = p.skills.shield.max;
           p.skills.shield.active = true;
           p.skills.shield.activeTimer = p.skills.shield.duration;
@@ -172,15 +245,15 @@ export class GameEngine {
           this.addShake(5, 0.2);
           this.spawnFloatingText("SHIELD!", '#3b82f6');
       } 
-      else if (index === 2 && p.skills.blackhole.current <= 0 && p.mana >= 60) {
-          p.mana -= 60;
+      else if (index === 2 && p.skills.blackhole.current <= 0 && (freeCost || p.mana >= 60)) {
+          if (!freeCost) p.mana -= 60;
           p.skills.blackhole.current = p.skills.blackhole.max;
           this.entities.push(new BlackHole(p.position.x, p.position.y - 300));
           this.addShake(10, 0.5);
           this.spawnFloatingText("SINGULARITY!", '#6366f1');
       }
-      else if (index === 3 && p.skills.shockwave.current <= 0 && p.mana >= 50) {
-          p.mana -= 50;
+      else if (index === 3 && p.skills.shockwave.current <= 0 && (freeCost || p.mana >= 50)) {
+          if (!freeCost) p.mana -= 50;
           p.skills.shockwave.current = p.skills.shockwave.max;
           this.entities.push(new Shockwave(p.position.x, p.position.y));
           this.addShake(25, 0.4);
@@ -200,7 +273,7 @@ export class GameEngine {
   }
 
   loop(timestamp: number) {
-    if (this.state !== GameState.PLAYING) return;
+    if (this.state !== GameState.PLAYING && this.state !== GameState.PRACTICE) return;
 
     let dt = Math.min((timestamp - this.lastTime) / 1000, 0.1); 
     this.lastTime = timestamp;
@@ -223,31 +296,40 @@ export class GameEngine {
         this.shakeTimer -= dt;
         if (this.shakeTimer <= 0) this.shakeIntensity = 0;
     }
-    
-    // Difficulty Settings Logic
-    let difficultyBase = 1;
-    if (this.settings.difficulty === 'EASY') difficultyBase = 0.5;
-    if (this.settings.difficulty === 'HARD') difficultyBase = 1.5;
 
-    this.difficultyMultiplier = difficultyBase + (this.score / 5000);
-    
-    // Boss Spawning
-    if (this.score > this.bossNextSpawnScore && !this.bossActive) {
-        this.spawnBoss();
-    }
+    const isPractice = this.state === GameState.PRACTICE;
 
-    this.spawnTimer += dt;
-    const spawnRate = this.bossActive ? 2.5 : Math.max(0.3, 1.8 - (this.difficultyMultiplier * 0.1)); 
-    if (this.spawnTimer > spawnRate && !this.bossActive) { 
-      this.spawnTimer = 0;
-      this.spawnEnemy();
-    } else if (this.bossActive && this.spawnTimer > 3.0) {
+    if (!isPractice) {
+      // Difficulty Settings Logic
+      let difficultyBase = 1;
+      if (this.settings.difficulty === 'EASY') difficultyBase = 0.5;
+      if (this.settings.difficulty === 'HARD') difficultyBase = 1.5;
+
+      this.difficultyMultiplier = difficultyBase + (this.score / 5000);
+
+      // Boss Spawning
+      if (this.score > this.bossNextSpawnScore && !this.bossActive) {
+          this.spawnBoss();
+      }
+
+      this.spawnTimer += dt;
+      const spawnRate = this.bossActive ? 2.5 : Math.max(0.3, 1.8 - (this.difficultyMultiplier * 0.1));
+      if (this.spawnTimer > spawnRate && !this.bossActive) {
         this.spawnTimer = 0;
-        this.spawnEnemy(); 
-    }
-    
-    if (Math.random() < 0.005) {
-        this.stars.push(new Meteor(this.width, this.height));
+        this.spawnEnemy();
+      } else if (this.bossActive && this.spawnTimer > 3.0) {
+          this.spawnTimer = 0;
+          this.spawnEnemy();
+      }
+
+      if (Math.random() < 0.005) {
+          this.stars.push(new Meteor(this.width, this.height));
+      }
+    } else {
+      // 练习场: 只刷点陨石当背景, 别的什么都不自动发生
+      if (Math.random() < 0.003) {
+          this.stars.push(new Meteor(this.width, this.height));
+      }
     }
 
     if (this.player && !this.player.markedForDeletion) {
@@ -456,7 +538,7 @@ export class GameEngine {
       }
 
       // Enemy Fire
-      if (entity instanceof Enemy) {
+      if (entity instanceof Enemy && !entity.isPractice) {
          if (entity.fireTimer <= 0) {
             entity.fireTimer = entity.fireRate / Math.min(this.difficultyMultiplier, 2.5);
             
@@ -509,7 +591,17 @@ export class GameEngine {
     this.entities = this.entities.filter(e => !e.markedForDeletion);
     this.stars = this.stars.filter(s => !s.markedForDeletion);
 
-    if (this.player && this.player.markedForDeletion) {
+    // 练习场: 玩家总是满血满蓝, 技能即时冷却
+    if (isPractice && this.player && !this.player.markedForDeletion) {
+      this.player.health = this.player.maxHealth;
+      this.player.mana = this.player.maxMana;
+      this.player.skills.shield.current = 0;
+      this.player.skills.blackhole.current = 0;
+      this.player.skills.shockwave.current = 0;
+      this.onHealthChange(this.player.health);
+    }
+
+    if (this.player && this.player.markedForDeletion && !isPractice) {
       this.state = GameState.GAME_OVER;
       this.onGameOver(this.score);
       // Restart background animation for the game over screen
@@ -521,20 +613,28 @@ export class GameEngine {
   killEnemy(enemy: Enemy) {
       if (enemy.markedForDeletion) return;
       enemy.markedForDeletion = true;
+
+      // 练习场: 不计分, 不掉落道具, 不长经验
+      if (enemy.isPractice) {
+          this.createExplosion(enemy.position.x, enemy.position.y, '#ffaa00', 15, 300);
+          if (enemy.isBoss) this.addShake(30, 2.0);
+          return;
+      }
+
       this.score += enemy.scoreValue;
       this.onScoreChange(this.score);
       this.createExplosion(enemy.position.x, enemy.position.y, '#ffaa00', 15, 300);
-      
+
       if (enemy.isBoss) {
           this.bossActive = false;
           // Set NEXT spawn score way ahead
           this.bossNextSpawnScore = this.score + 5000;
-          this.addShake(30, 2.0); 
+          this.addShake(30, 2.0);
           for(let i=0; i<5; i++) this.dropItem(enemy.position.x + (Math.random()-0.5)*100, enemy.position.y + (Math.random()-0.5)*100);
       } else {
           this.dropItem(enemy.position.x, enemy.position.y);
       }
-      
+
       if(this.player) this.player.gainXp(enemy.isBoss ? 2000 : 50);
   }
 
@@ -743,8 +843,14 @@ export class GameEngine {
     if ((isEnemyBullet && isPlayer) || (isEnemy && isPlayer)) {
         const player = (a instanceof Player) ? a : b as Player;
         const other = (a === player) ? b : a;
-        
-        if (player.skills.shield.active) return; 
+
+        if (player.skills.shield.active) return;
+
+        // 练习场: 玩家无敌, 只是清掉打中的弹
+        if (player.invincible) {
+            if (other instanceof Bullet) other.markedForDeletion = true;
+            return;
+        }
 
         if (other instanceof Bullet) other.markedForDeletion = true;
         else if (other instanceof Enemy) {

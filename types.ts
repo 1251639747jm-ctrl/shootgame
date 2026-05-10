@@ -13,7 +13,18 @@ export enum GameState {
   PLAYING,
   GAME_OVER,
   PAUSED,
-  VICTORY 
+  VICTORY,
+  PRACTICE // 武器试验场
+}
+
+// 练习场里可生成的 Bot 类型
+export enum BotKind {
+  BASIC,
+  FAST,
+  TANK,
+  KAMIKAZE,
+  BOSS,
+  STATIC // 靶子：不动，用来测 DPS
 }
 
 export enum EntityType {
@@ -99,4 +110,10 @@ export interface GameRef {
   markUITouch: (id: number) => void;
   unmarkUITouch: (id: number) => void;
   getJoystickState: () => { active: boolean; base: Vector2; knob: Vector2 };
+  // Practice mode
+  startPractice: () => void;
+  stopPractice: () => void;
+  spawnPracticeBot: (kind: BotKind) => void;
+  clearPracticeBots: () => void;
+  selectWeapon: (w: WeaponType) => void;
 }

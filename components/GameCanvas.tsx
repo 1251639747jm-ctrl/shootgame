@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useImperativeHandle, forwardRef } from 'react';
 import { GameEngine } from '../game/GameEngine';
-import { GameState, GameRef, WeaponType, GameSettings } from '../types';
+import { GameState, GameRef, WeaponType, GameSettings, BotKind } from '../types';
 
 interface GameCanvasProps {
   gameState: GameState;
@@ -10,9 +10,9 @@ interface GameCanvasProps {
   onWeaponChange: (weapon: WeaponType) => void;
 }
 
-export const GameCanvas = forwardRef<GameRef, GameCanvasProps>(({ 
-  gameState, 
-  onScoreChange, 
+export const GameCanvas = forwardRef<GameRef, GameCanvasProps>(({
+  gameState,
+  onScoreChange,
   onHealthChange,
   onGameOver,
   onWeaponChange
@@ -21,35 +21,20 @@ export const GameCanvas = forwardRef<GameRef, GameCanvasProps>(({
   const engineRef = useRef<GameEngine | null>(null);
 
   useImperativeHandle(ref, () => ({
-    switchWeapon: () => {
-      if (engineRef.current) {
-        engineRef.current.triggerWeaponSwitch();
-      }
-    },
-    triggerSkill: (index: number) => {
-        if (engineRef.current) {
-            engineRef.current.triggerSkill(index);
-        }
-    },
-    getPlayerState: () => {
-        return engineRef.current ? engineRef.current.getPlayerState() : null;
-    },
-    updateSettings: (settings: GameSettings) => {
-        if (engineRef.current) {
-            engineRef.current.updateSettings(settings);
-        }
-    },
-    markUITouch: (id: number) => {
-        engineRef.current?.input.markUITouch(id);
-    },
-    unmarkUITouch: (id: number) => {
-        engineRef.current?.input.unmarkUITouch(id);
-    },
-    getJoystickState: () => {
-        return engineRef.current
-            ? engineRef.current.input.getJoystickState()
-            : { active: false, base: { x: 0, y: 0 }, knob: { x: 0, y: 0 } };
-    }
+    switchWeapon: () => engineRef.current?.triggerWeaponSwitch(),
+    triggerSkill: (index: number) => engineRef.current?.triggerSkill(index),
+    getPlayerState: () => engineRef.current ? engineRef.current.getPlayerState() : null,
+    updateSettings: (settings: GameSettings) => engineRef.current?.updateSettings(settings),
+    markUITouch: (id: number) => engineRef.current?.input.markUITouch(id),
+    unmarkUITouch: (id: number) => engineRef.current?.input.unmarkUITouch(id),
+    getJoystickState: () => engineRef.current
+      ? engineRef.current.input.getJoystickState()
+      : { active: false, base: { x: 0, y: 0 }, knob: { x: 0, y: 0 } },
+    startPractice: () => engineRef.current?.startPractice(),
+    stopPractice: () => engineRef.current?.stopPractice(),
+    spawnPracticeBot: (kind: BotKind) => engineRef.current?.spawnPracticeBot(kind),
+    clearPracticeBots: () => engineRef.current?.clearPracticeBots(),
+    selectWeapon: (w: WeaponType) => engineRef.current?.selectWeapon(w)
   }));
 
   useEffect(() => {
@@ -74,7 +59,6 @@ export const GameCanvas = forwardRef<GameRef, GameCanvasProps>(({
     window.addEventListener('resize', handleResize);
     handleResize();
 
-    // Start menu background animation immediately
     engineRef.current.startMenuAnimation();
 
     return () => {
@@ -84,16 +68,21 @@ export const GameCanvas = forwardRef<GameRef, GameCanvasProps>(({
   }, []);
 
   useEffect(() => {
-    if (!engineRef.current) return;
+    const engine = engineRef.current;
+    if (!engine) return;
 
-    if (gameState === GameState.PLAYING && engineRef.current.state !== GameState.PLAYING) {
-      engineRef.current.start();
+    if (gameState === GameState.PLAYING && engine.state !== GameState.PLAYING) {
+      engine.start();
+    } else if (gameState === GameState.PRACTICE && engine.state !== GameState.PRACTICE) {
+      engine.startPractice();
+    } else if (gameState === GameState.MENU && engine.state !== GameState.MENU) {
+      engine.stopPractice();
     }
   }, [gameState]);
 
   return (
-    <canvas 
-      ref={canvasRef} 
+    <canvas
+      ref={canvasRef}
       className="absolute top-0 left-0 w-full h-full block touch-none"
     />
   );
