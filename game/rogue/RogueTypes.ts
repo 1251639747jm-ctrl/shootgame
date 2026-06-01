@@ -5,8 +5,12 @@
  *   选择初始武器 -> 第 N 层: 击败随机 Boss -> 选择增益 -> 下一层
  *
  * 初始武器: 机枪 / 激光 / 魔法阵 (三选一)
- * 魔法阵: 自动施法系统, 选择火 / 电派系, 各 5 个独立技能
- *         (技能在玩家处蓄力绘制对应法阵 -> 释放, 增益围绕 冷却/伤害/范围)
+ * 魔法阵: 手动施法系统, 选择火 / 电派系, 各 5 个法术, Q 切换 / 开火释放
+ *
+ * 魔法阵增益分两类:
+ *   1) 全法术整体增益: 冷却 / 伤害 / 范围 / 蓄力速度 (每法术都受益, 较小幅度)
+ *   2) 单法术专属增益: 针对该法术的"痛点"做强化
+ *      (例: 数量型 +N 颗, 单体型 加余震, 区域型 加时长 等)
  */
 
 import { WeaponType, EntityType } from "../../types";
@@ -75,14 +79,44 @@ export enum PerkId {
     UNLOCK_SHOCKWAVE= 'UNLOCK_SHOCKWAVE',// 解锁冲击波
     SKILL_CD_DOWN   = 'SKILL_CD_DOWN',   // 技能冷却 -25%
 
-    // 魔法阵专属 (仅当武器 = MAGIC_CIRCLE 时出现)
-    //   全部围绕"冷却 / 伤害 / 范围"三类
+    // === 魔法阵 全法术整体增益 (4 类, 都受益小幅度) ===
     CIRCLE_CD_DOWN     = 'CIRCLE_CD_DOWN',     // 法术冷却 -20%
     CIRCLE_DMG_UP      = 'CIRCLE_DMG_UP',      // 法术伤害 +30%
     CIRCLE_RANGE_UP    = 'CIRCLE_RANGE_UP',    // 法术范围 +25%
-    CIRCLE_QUICK_CAST  = 'CIRCLE_QUICK_CAST',  // 蓄力时长 -30% (=施法更快, 等价于变相缩短冷却)
-    CIRCLE_OVERCHARGE  = 'CIRCLE_OVERCHARGE',  // 强力组合: 伤害 +50% & 范围 +30% (unique)
-    CIRCLE_HASTE       = 'CIRCLE_HASTE',       // 强力组合: 冷却 -40% (unique)
+    CIRCLE_QUICK_CAST  = 'CIRCLE_QUICK_CAST',  // 蓄力时长 -30%
+
+    // === 魔法阵 单法术专属 (10 法术 × 2 = 20 个, 针对痛点) ===
+    // 火系
+    METEOR_COUNT       = 'METEOR_COUNT',       // 流星雨 +2 颗
+    METEOR_SPLIT       = 'METEOR_SPLIT',       // 流星雨 落地分裂 3 颗子流星
+
+    NOVA_DOUBLE        = 'NOVA_DOUBLE',        // 火焰新星 二段爆 (略大半径)
+    NOVA_BURN          = 'NOVA_BURN',          // 火焰新星 留下 2s 灼烧地带
+
+    MAGMA_COUNT        = 'MAGMA_COUNT',        // 熔岩飞弹 +2 颗
+    MAGMA_EXPLODE      = 'MAGMA_EXPLODE',      // 熔岩飞弹 爆炸半径 +100%
+
+    INFERNO_DURATION   = 'INFERNO_DURATION',   // 烈焰风暴 +2 秒持续
+    INFERNO_FOLLOW     = 'INFERNO_FOLLOW',     // 烈焰风暴 跟随玩家
+
+    HAMMER_AFTERSHOCK  = 'HAMMER_AFTERSHOCK',  // 火神之锤 +1 道余震环
+    HAMMER_SPLASH      = 'HAMMER_SPLASH',      // 火神之锤 召唤 4 颗溅射流星
+
+    // 电系
+    CHAIN_JUMPS        = 'CHAIN_JUMPS',        // 闪电链 +4 跳
+    CHAIN_NODECAY      = 'CHAIN_NODECAY',      // 闪电链 不衰减伤害
+
+    THUNDER_BOLTS      = 'THUNDER_BOLTS',      // 天雷 +3 道
+    THUNDER_OVERCHARGE = 'THUNDER_OVERCHARGE', // 天雷 蓄电核心 (1s 后再爆)
+
+    STATIC_DURATION    = 'STATIC_DURATION',    // 静电场 +2 秒持续
+    STATIC_SLOW        = 'STATIC_SLOW',        // 静电场 阵内减速 + 半径 +50%
+
+    RAILGUN_WIDTH      = 'RAILGUN_WIDTH',      // 电磁轨道炮 宽度 +100%
+    RAILGUN_DOUBLE     = 'RAILGUN_DOUBLE',     // 电磁轨道炮 双发
+
+    PLASMA_COUNT       = 'PLASMA_COUNT',       // 电浆轰炸 +2 颗
+    PLASMA_SPLIT       = 'PLASMA_SPLIT',       // 电浆轰炸 命中后分裂
 
     // 激光专属
     LASER_DPS_UP     = 'LASER_DPS_UP',       // 激光 DPS +30%
@@ -105,6 +139,8 @@ export interface PerkDef {
     requireWeapon?: 'VULCAN' | 'LASER' | 'MAGIC_CIRCLE';
     /** 是否只在特定元素时出现 */
     requireElement?: CircleElement;
+    /** 是否只在选了特定法术派系时才出现 (用于专属增益限定到火系/电系) */
+    requireSpell?: MagicSkillId;
     /** 是否只出现一次 (解锁类) */
     unique?: boolean;
     /** 最多叠几层 (默认无限) */
@@ -132,6 +168,13 @@ export interface RogueState {
     bossHpScale: number;
 }
 
+/**
+ * 每法术专属增益的扁平字典. 由 RogueModifiers.spellPerks[skillId] 索引到.
+ * key 与 MagicCircle.fire() 内部使用的字符串保持一致.
+ *   layers: 该 perk 已经被选了几次 (大部分 unique = 0 或 1)
+ */
+export type PerSpellPerks = { [key: string]: number };
+
 export interface RogueModifiers {
     damageMultiplier: number;   // 1.0 = 基础
     fireRateMultiplier: number; // 1.0 = 基础
@@ -142,11 +185,15 @@ export interface RogueModifiers {
     critChance: number;         // 0.0 ~ 1.0
     skillCdMultiplier: number;  // 1.0 = 基础, 越低越好
 
-    // 魔法阵 (新): 全部围绕 冷却 / 伤害 / 范围
+    // 魔法阵 全法术整体增益
     circleCdMul: number;        // 1.0 = 基础, < 1 缩短法术冷却
     circleDmgMul: number;       // 1.0 = 基础, > 1 增加法术伤害
     circleRangeMul: number;     // 1.0 = 基础, > 1 扩大法术范围
-    circleCastSpeedMul: number; // 1.0 = 基础, < 1 蓄力更快 (相当于减冷却)
+    circleCastSpeedMul: number; // 1.0 = 基础, < 1 蓄力更快
+
+    // 魔法阵 单法术专属增益
+    // spellPerks[FIRE_METEOR]['count'] = 1 -> 流星雨多了 1 层 "+2 颗" perk
+    spellPerks: Record<MagicSkillId, PerSpellPerks>;
 
     // 激光
     laserDpsMul: number;
@@ -191,7 +238,7 @@ export const STARTER_OPTIONS: StarterConfig[] = [
     {
         key: 'MAGIC_CIRCLE',
         name: '魔法阵',
-        desc: '自动施法系统, 在战机处蓄力绘制法阵后释放各式法术',
+        desc: '5 个法术手动切换释放, 每个都有专属强化',
         color: '#a855f7',
         icon: '🔮'
     }
@@ -199,7 +246,7 @@ export const STARTER_OPTIONS: StarterConfig[] = [
 
 // ================== 所有增益定义池 ==================
 export const PERK_POOL: PerkDef[] = [
-    // 通用
+    // ----- 通用 -----
     { id: PerkId.DMG_UP, name: '伤害强化', desc: '全局伤害 +25%', icon: '⚔️', color: '#ef4444' },
     { id: PerkId.FIRE_RATE_UP, name: '射速强化', desc: '射速 +20%', icon: '💨', color: '#f97316' },
     // 散射只对机枪有意义
@@ -210,32 +257,112 @@ export const PERK_POOL: PerkDef[] = [
     { id: PerkId.MOVE_SPEED_UP, name: '推进器升级', desc: '移速 +15%', icon: '🚀', color: '#06b6d4', maxStack: 3 },
     { id: PerkId.CRIT_CHANCE, name: '致命精度', desc: '暴击率 +10% (2x 伤害)', icon: '💥', color: '#dc2626', maxStack: 5 },
 
-    // 技能解锁
+    // ----- 主动技能解锁 -----
     { id: PerkId.UNLOCK_SHIELD, name: '护盾模块', desc: '解锁"护盾"主动技能', icon: '🛡️', color: '#3b82f6', unique: true },
     { id: PerkId.UNLOCK_BLACKHOLE, name: '奇点引擎', desc: '解锁"黑洞"主动技能', icon: '🌀', color: '#6366f1', unique: true },
     { id: PerkId.UNLOCK_SHOCKWAVE, name: '冲击波芯片', desc: '解锁"冲击波"主动技能', icon: '💫', color: '#fbbf24', unique: true },
     { id: PerkId.SKILL_CD_DOWN, name: '冷却优化', desc: '所有技能冷却 -25%', icon: '⏱️', color: '#8b5cf6', maxStack: 3 },
 
-    // 魔法阵 (新): 全部围绕 冷却 / 伤害 / 范围
-    { id: PerkId.CIRCLE_CD_DOWN,    name: '法术冷却',   desc: '魔法阵冷却 -20%',           icon: '⏱️', color: '#a78bfa', requireWeapon: 'MAGIC_CIRCLE', maxStack: 4 },
-    { id: PerkId.CIRCLE_DMG_UP,     name: '法术增幅',   desc: '魔法阵伤害 +30%',           icon: '🔥', color: '#f43f5e', requireWeapon: 'MAGIC_CIRCLE', maxStack: 5 },
-    { id: PerkId.CIRCLE_RANGE_UP,   name: '法术扩域',   desc: '魔法阵范围 +25%',           icon: '⭕', color: '#c084fc', requireWeapon: 'MAGIC_CIRCLE', maxStack: 4 },
-    { id: PerkId.CIRCLE_QUICK_CAST, name: '极速蓄力',   desc: '蓄力时长 -30% (减冷却)',     icon: '⚡', color: '#22d3ee', requireWeapon: 'MAGIC_CIRCLE', maxStack: 2 },
-    { id: PerkId.CIRCLE_OVERCHARGE, name: '法术超载',   desc: '伤害 +50% & 范围 +30%',     icon: '✨', color: '#fb7185', requireWeapon: 'MAGIC_CIRCLE', unique: true },
-    { id: PerkId.CIRCLE_HASTE,      name: '魔能急行',   desc: '所有法术冷却 -40%',         icon: '🌀', color: '#7c3aed', requireWeapon: 'MAGIC_CIRCLE', unique: true },
+    // ----- 魔法阵 全法术整体增益 (4 类) -----
+    { id: PerkId.CIRCLE_CD_DOWN,    name: '法阵冷却',   desc: '所有法术冷却 -20%',   icon: '⏱️', color: '#a78bfa', requireWeapon: 'MAGIC_CIRCLE', maxStack: 4 },
+    { id: PerkId.CIRCLE_DMG_UP,     name: '法阵增幅',   desc: '所有法术伤害 +30%',   icon: '🔥', color: '#f43f5e', requireWeapon: 'MAGIC_CIRCLE', maxStack: 5 },
+    { id: PerkId.CIRCLE_RANGE_UP,   name: '法阵扩域',   desc: '所有法术范围 +25%',   icon: '⭕', color: '#c084fc', requireWeapon: 'MAGIC_CIRCLE', maxStack: 4 },
+    { id: PerkId.CIRCLE_QUICK_CAST, name: '极速蓄力',   desc: '蓄力时长 -30%',       icon: '⚡', color: '#22d3ee', requireWeapon: 'MAGIC_CIRCLE', maxStack: 2 },
 
-    // 激光
+    // ----- 魔法阵 单法术专属 · 火系 -----
+    { id: PerkId.METEOR_COUNT,      name: '流星增援', desc: '流星雨 +2 颗流星',         icon: '☄️', color: '#fb923c', requireSpell: MagicSkillId.FIRE_METEOR, maxStack: 3 },
+    { id: PerkId.METEOR_SPLIT,      name: '碎裂陨石', desc: '流星落地分裂 3 颗子流星',  icon: '💥', color: '#f97316', requireSpell: MagicSkillId.FIRE_METEOR, unique: true },
+
+    { id: PerkId.NOVA_DOUBLE,       name: '二段爆裂', desc: '火焰新星 0.3s 后再爆一次', icon: '🌋', color: '#fb923c', requireSpell: MagicSkillId.FIRE_NOVA, unique: true },
+    { id: PerkId.NOVA_BURN,         name: '余烬地带', desc: '新星留下 2s 持续灼烧',     icon: '🔥', color: '#f97316', requireSpell: MagicSkillId.FIRE_NOVA, unique: true },
+
+    { id: PerkId.MAGMA_COUNT,       name: '熔岩齐射', desc: '熔岩飞弹 +2 颗',            icon: '🪨', color: '#ef4444', requireSpell: MagicSkillId.FIRE_MAGMA, maxStack: 3 },
+    { id: PerkId.MAGMA_EXPLODE,     name: '裂地爆炸', desc: '熔岩飞弹爆炸半径 +100%',    icon: '💣', color: '#dc2626', requireSpell: MagicSkillId.FIRE_MAGMA, maxStack: 2 },
+
+    { id: PerkId.INFERNO_DURATION,  name: '永焰', desc: '烈焰风暴持续 +2 秒',           icon: '⏳', color: '#dc2626', requireSpell: MagicSkillId.FIRE_INFERNO, maxStack: 3 },
+    { id: PerkId.INFERNO_FOLLOW,    name: '烈焰附身', desc: '烈焰风暴跟随玩家移动',     icon: '👤', color: '#fb923c', requireSpell: MagicSkillId.FIRE_INFERNO, unique: true },
+
+    { id: PerkId.HAMMER_AFTERSHOCK, name: '余震', desc: '火神之锤 +1 道扩散冲击环',     icon: '〰️', color: '#fbbf24', requireSpell: MagicSkillId.FIRE_HAMMER, maxStack: 3 },
+    { id: PerkId.HAMMER_SPLASH,     name: '飞火溅星', desc: '火神之锤召唤 4 颗溅射流星', icon: '🌟', color: '#fb923c', requireSpell: MagicSkillId.FIRE_HAMMER, unique: true },
+
+    // ----- 魔法阵 单法术专属 · 电系 -----
+    { id: PerkId.CHAIN_JUMPS,       name: '链式扩展', desc: '闪电链 +4 跳',              icon: '🔗', color: '#a78bfa', requireSpell: MagicSkillId.ELEC_CHAIN, maxStack: 2 },
+    { id: PerkId.CHAIN_NODECAY,     name: '完美导体', desc: '闪电链跳数无伤害衰减',      icon: '⚡', color: '#c084fc', requireSpell: MagicSkillId.ELEC_CHAIN, unique: true },
+
+    { id: PerkId.THUNDER_BOLTS,     name: '雷霆增幅', desc: '天雷 +3 道',                icon: '🌩️', color: '#c084fc', requireSpell: MagicSkillId.ELEC_THUNDER, maxStack: 2 },
+    { id: PerkId.THUNDER_OVERCHARGE,name: '蓄电核心', desc: '天雷落点 1s 后再爆一次',    icon: '🔋', color: '#a78bfa', requireSpell: MagicSkillId.ELEC_THUNDER, unique: true },
+
+    { id: PerkId.STATIC_DURATION,   name: '持久磁场', desc: '静电场持续 +2 秒',           icon: '⏳', color: '#8b5cf6', requireSpell: MagicSkillId.ELEC_STATIC, maxStack: 3 },
+    { id: PerkId.STATIC_SLOW,       name: '电磁束缚', desc: '静电场范围 +50% & 减速敌人', icon: '🕸️', color: '#a78bfa', requireSpell: MagicSkillId.ELEC_STATIC, unique: true },
+
+    { id: PerkId.RAILGUN_WIDTH,     name: '加宽聚束', desc: '电磁轨道炮宽度 +100%',       icon: '📐', color: '#22d3ee', requireSpell: MagicSkillId.ELEC_RAILGUN, maxStack: 2 },
+    { id: PerkId.RAILGUN_DOUBLE,    name: '双管齐射', desc: '电磁轨道炮 0.12s 后再射一发', icon: '🎯', color: '#06b6d4', requireSpell: MagicSkillId.ELEC_RAILGUN, unique: true },
+
+    { id: PerkId.PLASMA_COUNT,      name: '电浆增量', desc: '电浆轰炸 +2 颗',             icon: '🔮', color: '#6366f1', requireSpell: MagicSkillId.ELEC_PLASMA, maxStack: 2 },
+    { id: PerkId.PLASMA_SPLIT,      name: '电浆裂变', desc: '电浆球命中后分裂 4 颗小球',  icon: '💠', color: '#818cf8', requireSpell: MagicSkillId.ELEC_PLASMA, unique: true },
+
+    // ----- 激光 -----
     { id: PerkId.LASER_DPS_UP, name: '光束增幅', desc: '激光 DPS +30%', icon: '🔆', color: '#38bdf8', requireWeapon: 'LASER', maxStack: 4 },
     { id: PerkId.LASER_WIDTH_UP, name: '光束扩散', desc: '光束宽度 +40%', icon: '📐', color: '#06b6d4', requireWeapon: 'LASER', maxStack: 3 },
     { id: PerkId.LASER_CD_DOWN, name: '快速充能', desc: '冷却时间 -1 秒', icon: '⏩', color: '#0ea5e9', requireWeapon: 'LASER', maxStack: 2 },
 
-    // 机枪
+    // ----- 机枪 -----
     { id: PerkId.VULCAN_BOUNCE, name: '弹射弹头', desc: '子弹命中后弹射 1 次', icon: '↗️', color: '#facc15', requireWeapon: 'VULCAN', unique: true },
     { id: PerkId.VULCAN_PIERCE, name: '穿甲弹', desc: '子弹穿透 +1 个敌人', icon: '🔩', color: '#d97706', requireWeapon: 'VULCAN', maxStack: 2 },
     { id: PerkId.VULCAN_EXPLOSIVE, name: '爆裂弹', desc: '命中时小范围爆炸', icon: '💣', color: '#ef4444', requireWeapon: 'VULCAN', unique: true },
 ];
 
+/** 给单法术专属 perk 用: perk id -> [skillId, key]
+ *  computeModifiers 根据这个表把 perk 累加到 spellPerks[skillId][key].
+ *  key 必须和 MagicCircle.fire() 中 spellPerk(id, 'xxx') 的字符串一致.
+ */
+const SPELL_PERK_MAP: Partial<Record<PerkId, [MagicSkillId, string]>> = {
+    [PerkId.METEOR_COUNT]:       [MagicSkillId.FIRE_METEOR, 'count'],
+    [PerkId.METEOR_SPLIT]:       [MagicSkillId.FIRE_METEOR, 'split'],
+    [PerkId.NOVA_DOUBLE]:        [MagicSkillId.FIRE_NOVA, 'doubleBlast'],
+    [PerkId.NOVA_BURN]:          [MagicSkillId.FIRE_NOVA, 'burnGround'],
+    [PerkId.MAGMA_COUNT]:        [MagicSkillId.FIRE_MAGMA, 'count'],
+    [PerkId.MAGMA_EXPLODE]:      [MagicSkillId.FIRE_MAGMA, 'explode'],
+    [PerkId.INFERNO_DURATION]:   [MagicSkillId.FIRE_INFERNO, 'duration'],
+    [PerkId.INFERNO_FOLLOW]:     [MagicSkillId.FIRE_INFERNO, 'follow'],
+    [PerkId.HAMMER_AFTERSHOCK]:  [MagicSkillId.FIRE_HAMMER, 'aftershock'],
+    [PerkId.HAMMER_SPLASH]:      [MagicSkillId.FIRE_HAMMER, 'splash'],
+
+    [PerkId.CHAIN_JUMPS]:        [MagicSkillId.ELEC_CHAIN, 'jumps'],
+    [PerkId.CHAIN_NODECAY]:      [MagicSkillId.ELEC_CHAIN, 'noDecay'],
+    [PerkId.THUNDER_BOLTS]:      [MagicSkillId.ELEC_THUNDER, 'bolts'],
+    [PerkId.THUNDER_OVERCHARGE]: [MagicSkillId.ELEC_THUNDER, 'overcharge'],
+    [PerkId.STATIC_DURATION]:    [MagicSkillId.ELEC_STATIC, 'duration'],
+    [PerkId.STATIC_SLOW]:        [MagicSkillId.ELEC_STATIC, 'slow'],
+    [PerkId.RAILGUN_WIDTH]:      [MagicSkillId.ELEC_RAILGUN, 'width'],
+    [PerkId.RAILGUN_DOUBLE]:     [MagicSkillId.ELEC_RAILGUN, 'double'],
+    [PerkId.PLASMA_COUNT]:       [MagicSkillId.ELEC_PLASMA, 'count'],
+    [PerkId.PLASMA_SPLIT]:       [MagicSkillId.ELEC_PLASMA, 'split'],
+};
+
+/** 单法术 perk 限定到火/电系: 选了火系则只出现火系法术的 perk */
+const SPELL_TO_ELEMENT: Record<MagicSkillId, CircleElement> = {
+    [MagicSkillId.FIRE_METEOR]:  CircleElement.FIRE,
+    [MagicSkillId.FIRE_NOVA]:    CircleElement.FIRE,
+    [MagicSkillId.FIRE_MAGMA]:   CircleElement.FIRE,
+    [MagicSkillId.FIRE_INFERNO]: CircleElement.FIRE,
+    [MagicSkillId.FIRE_HAMMER]:  CircleElement.FIRE,
+    [MagicSkillId.ELEC_CHAIN]:   CircleElement.ELECTRIC,
+    [MagicSkillId.ELEC_THUNDER]: CircleElement.ELECTRIC,
+    [MagicSkillId.ELEC_STATIC]:  CircleElement.ELECTRIC,
+    [MagicSkillId.ELEC_RAILGUN]: CircleElement.ELECTRIC,
+    [MagicSkillId.ELEC_PLASMA]:  CircleElement.ELECTRIC,
+};
+
 // ================== 工具函数 ==================
+
+function emptySpellPerks(): Record<MagicSkillId, PerSpellPerks> {
+    const out: any = {};
+    for (const id of Object.values(MagicSkillId)) {
+        out[id] = {};
+    }
+    return out as Record<MagicSkillId, PerSpellPerks>;
+}
 
 /** 根据当前状态计算 modifiers */
 export function computeModifiers(perks: PerkId[]): RogueModifiers {
@@ -252,6 +379,7 @@ export function computeModifiers(perks: PerkId[]): RogueModifiers {
         circleDmgMul: 1,
         circleRangeMul: 1,
         circleCastSpeedMul: 1,
+        spellPerks: emptySpellPerks(),
         laserDpsMul: 1,
         laserWidthMul: 1,
         laserCdReduction: 0,
@@ -264,6 +392,14 @@ export function computeModifiers(perks: PerkId[]): RogueModifiers {
     };
 
     for (const p of perks) {
+        // 单法术专属 perk: 通过 SPELL_PERK_MAP 累加到 spellPerks[skillId][key]
+        const mapped = SPELL_PERK_MAP[p];
+        if (mapped) {
+            const [skillId, key] = mapped;
+            m.spellPerks[skillId][key] = (m.spellPerks[skillId][key] ?? 0) + 1;
+            continue;
+        }
+
         switch (p) {
             case PerkId.DMG_UP:           m.damageMultiplier *= 1.25; break;
             case PerkId.FIRE_RATE_UP:     m.fireRateMultiplier *= 1.2; break;
@@ -278,13 +414,10 @@ export function computeModifiers(perks: PerkId[]): RogueModifiers {
             case PerkId.UNLOCK_BLACKHOLE: m.hasBlackhole = true; break;
             case PerkId.UNLOCK_SHOCKWAVE: m.hasShockwave = true; break;
 
-            // 魔法阵 (新)
             case PerkId.CIRCLE_CD_DOWN:    m.circleCdMul *= 0.8; break;
             case PerkId.CIRCLE_DMG_UP:     m.circleDmgMul *= 1.3; break;
             case PerkId.CIRCLE_RANGE_UP:   m.circleRangeMul *= 1.25; break;
             case PerkId.CIRCLE_QUICK_CAST: m.circleCastSpeedMul *= 0.7; break;
-            case PerkId.CIRCLE_OVERCHARGE: m.circleDmgMul *= 1.5; m.circleRangeMul *= 1.3; break;
-            case PerkId.CIRCLE_HASTE:      m.circleCdMul *= 0.6; break;
 
             case PerkId.LASER_DPS_UP:     m.laserDpsMul *= 1.3; break;
             case PerkId.LASER_WIDTH_UP:   m.laserWidthMul *= 1.4; break;
@@ -312,6 +445,11 @@ export function drawPerks(
         if (def.requireWeapon && def.requireWeapon !== state.starterWeapon) return false;
         // 元素限定
         if (def.requireElement && def.requireElement !== state.circleElement) return false;
+        // 法术专属: 仅当玩家选了魔法阵 + 该法术属于玩家当前派系时才出现
+        if (def.requireSpell) {
+            if (state.starterWeapon !== 'MAGIC_CIRCLE') return false;
+            if (state.circleElement !== SPELL_TO_ELEMENT[def.requireSpell]) return false;
+        }
         // 唯一性: 已经拥有则不再出现
         if (def.unique && state.perks.includes(def.id)) return false;
         // 叠加上限
@@ -323,8 +461,8 @@ export function drawPerks(
     });
 
     // 分类: 武器专属 vs 通用
-    const weaponSpecific = eligible.filter(d => d.requireWeapon || d.requireElement);
-    const generic        = eligible.filter(d => !d.requireWeapon && !d.requireElement);
+    const weaponSpecific = eligible.filter(d => d.requireWeapon || d.requireElement || d.requireSpell);
+    const generic        = eligible.filter(d => !d.requireWeapon && !d.requireElement && !d.requireSpell);
 
     const shuffle = <T>(arr: T[]): T[] => {
         const a = [...arr];

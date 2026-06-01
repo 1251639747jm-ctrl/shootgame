@@ -8,7 +8,7 @@ import { EnemyLaser } from "../EnemyLaser";
 import { InputManager } from "../InputManager";
 import { Renderer } from "../Renderer";
 import { EntityType, WeaponType, GameSettings } from "../../types";
-import { MagicCircle, MagicSpellFx, SpellContext } from "./MagicCircle";
+import { MagicCircle, MagicSpellFx, SpellContext, MagicAuraField } from "./MagicCircle";
 import {
     RogueState, RoguePhase, PerkId, PerkDef, CircleElement,
     createRogueState, computeModifiers, drawPerks
@@ -99,6 +99,60 @@ export class RogueEngine {
 
     stop() {
         this.running = false;
+    }
+
+    // ================== 公开 API (供 React HUD 调用) ==================
+
+    /**
+     * 切换当前选中的法术 (映射到 GameRef.switchWeapon).
+     * 仅当玩家选了魔法阵时有效.
+     */
+    triggerWeaponSwitch() {
+        this.magicCircle?.switchToNext();
+    }
+
+    /** 直接选中第 i 个法术 (UI 法术轮点击) */
+    triggerSpellByIndex(i: number) {
+        this.magicCircle?.setSpell(i);
+    }
+
+    /**
+     * 给 React HUD 用的法术状态快照. 没选魔法阵时返回 null.
+     */
+    getMagicState(): {
+        element: 'FIRE' | 'ELECTRIC';
+        currentIndex: number;
+        skills: Array<{
+            id: string;
+            name: string;
+            color: string;
+            cooldown: number;       // 剩余冷却秒数 (0 = ready)
+            cooldownMax: number;    // 总冷却 (考虑 perk)
+            castTime: number;       // 总蓄力时间 (考虑 perk)
+        }>;
+        casting: { index: number; progress: number } | null;
+    } | null {
+        if (!this.magicCircle) return null;
+        const c = this.magicCircle;
+        const skills = c.skills.map((s, i) => ({
+            id: s.id as string,
+            name: s.name,
+            color: s.color,
+            cooldown: c.getCooldown(s.id),
+            cooldownMax: s.cooldown * c.modifiers.circleCdMul,
+            castTime: s.castTime * c.modifiers.circleCastSpeedMul,
+        }));
+        let casting: { index: number; progress: number } | null = null;
+        if (c.casting) {
+            const idx = c.skills.findIndex(s => s.id === c.casting!.skill.id);
+            if (idx >= 0) casting = { index: idx, progress: c.getCastProgress() };
+        }
+        return {
+            element: c.element as 'FIRE' | 'ELECTRIC',
+            currentIndex: c.currentSpellIndex,
+            skills,
+            casting,
+        };
     }
 
     // ================== 游戏循环 ==================
@@ -221,10 +275,33 @@ export class RogueEngine {
         const enemies = this.entities.filter(e => e instanceof Enemy && !e.markedForDeletion) as Enemy[];
         const playerPos = this.player.position;
 
+        // 收集场上所有 "带减速效果" 的静电场, 用来在小怪 update 前应用减速 dt
+        const slowFields: { x: number; y: number; r2: number; factor: number }[] = [];
+        for (const e of this.entities) {
+            if (e instanceof MagicAuraField && e.slowFactor < 1 && !e.markedForDeletion) {
+                slowFields.push({
+                    x: e.cx, y: e.cy,
+                    r2: e.fieldRadius * e.fieldRadius,
+                    factor: e.slowFactor
+                });
+            }
+        }
+
         this.entities.forEach(entity => {
             if (entity instanceof Missile) entity.update(dt, enemies);
             else if (entity instanceof Laser) entity.update(dt, enemies);
-            else entity.update(dt, playerPos);
+            else if (entity instanceof Enemy && !entity.isBoss && slowFields.length > 0) {
+                // 小怪在静电场内 -> 用减速 dt 推进 (Boss 不受影响, 保持战斗张力)
+                let f = 1;
+                for (const sf of slowFields) {
+                    const dx = entity.position.x - sf.x;
+                    const dy = entity.position.y - sf.y;
+                    if (dx * dx + dy * dy <= sf.r2 && sf.factor < f) f = sf.factor;
+                }
+                entity.update(dt * f, playerPos);
+            } else {
+                entity.update(dt, playerPos);
+            }
         });
 
         // ========== 敌人开火 (在 Enemy.update 之后, fireTimer 已被扣减) ==========
@@ -238,11 +315,16 @@ export class RogueEngine {
             }
         }
 
-        // ========== 魔法阵: 自动施法系统 ==========
-        // 不再需要 tryTick / setActive — caster 内部自动循环施法
-        // (由 MagicCircle.update 推进, fire 时直接通过 SpellContext 推送效果实体)
+        // ========== 魔法阵: 手动施法系统 ==========
+        // - 长按开火 + 当前选中法术 ready -> 在玩家位置蓄力 -> 蓄满释放
+        // - 松开开火: 取消蓄力 (不消耗冷却)
+        // - 切换法术: triggerWeaponSwitch() / Q 键
         if (this.magicCircle) {
-            this.magicCircle.update(dt);
+            // Q 切换法术 (桌面端 hotkey)
+            if (this.input.isKeyPressed('q')) {
+                this.magicCircle.switchToNext();
+            }
+            this.magicCircle.update(dt, undefined, this.input.isFiring);
         }
 
         // ========== 碰撞 ==========

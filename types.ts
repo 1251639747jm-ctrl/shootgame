@@ -134,4 +134,13 @@ export interface GameRef {
   // Rogue mode
   startRogue: () => void;
   stopRogue: () => void;
+  /** 法术轮状态; 没在肉鸽模式或没选魔法阵则返回 null */
+  getMagicState: () => null | {
+    element: 'FIRE' | 'ELECTRIC';
+    currentIndex: number;
+    skills: Array<{ id: string; name: string; color: string; cooldown: number; cooldownMax: number; castTime: number; }>;
+    casting: { index: number; progress: number } | null;
+  };
+  /** 直接选中第 i 个法术 (UI 法术轮点击) */
+  selectMagicSpell: (i: number) => void;
 }

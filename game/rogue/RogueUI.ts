@@ -2,14 +2,13 @@ import { Player, Enemy } from "../Entities";
 import { RogueState, RoguePhase, PerkDef, STARTER_OPTIONS, PERK_POOL, PerkId, CircleElement } from "./RogueTypes";
 
 /**
- * 肉鸽模式 UI 绘制 + 点击判定
+ * 肉鸽模式 UI 绘制 + 点击判定 (响应式).
  *
  * 纯 Canvas 2D 绘制, 不依赖 DOM.
- * 包含:
- * - 初始武器选择 (3 张大卡片)
- * - Perk 选择 (3 张卡片)
- * - 战斗 HUD (层数 / 玩家血条 / Boss 血条 / 武器 / 技能 / 已获得增益)
- * - 结束画面
+ * 所有尺寸都通过 this.s() 缩放, 在窄屏 (<640px) 自动收紧:
+ *   - 卡片更小, 字号更小, 间距更紧
+ *   - 卡片改为竖排或网格 (避免横向溢出)
+ *   - HUD 全部自动缩放
  */
 export class RogueUI {
     ctx: CanvasRenderingContext2D;
@@ -32,6 +31,24 @@ export class RogueUI {
         this.height = h;
     }
 
+    /** 是否是窄屏 (移动端) */
+    private get isMobile(): boolean {
+        return this.width < 640;
+    }
+
+    /** UI 缩放系数: 移动端 0.7~0.8x */
+    private get uiScale(): number {
+        if (this.width < 380) return 0.65;
+        if (this.width < 480) return 0.7;
+        if (this.width < 640) return 0.8;
+        return 1;
+    }
+
+    /** 把基准像素值按 uiScale 缩放后取整 */
+    private s(px: number): number {
+        return Math.round(px * this.uiScale);
+    }
+
     // ================== 武器选择画面 ==================
     drawWeaponSelect(state: RogueState) {
         const ctx = this.ctx;
@@ -39,54 +56,82 @@ export class RogueUI {
         ctx.fillRect(0, 0, this.width, this.height);
 
         ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 36px sans-serif';
+        ctx.font = `bold ${this.s(30)}px sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText('选择初始武器', this.width / 2, 80);
+        ctx.fillText('选择初始武器', this.width / 2, this.s(60));
 
-        ctx.font = '16px sans-serif';
+        ctx.font = `${this.s(13)}px sans-serif`;
         ctx.fillStyle = '#94a3b8';
-        ctx.fillText('肉鸽模式 · 每层击败 Boss 后选择增益', this.width / 2, 120);
+        ctx.fillText('肉鸽模式 · 每层击败 Boss 后选择增益', this.width / 2, this.s(96));
 
-        const cardW = 180;
-        const cardH = 260;
-        const gap = 30;
-        const totalW = cardW * 3 + gap * 2;
-        const startX = (this.width - totalW) / 2;
-        const startY = (this.height - cardH) / 2;
+        // 卡片: 移动端竖排, 桌面横排
+        const stackVertical = this.isMobile;
+        const cardW = stackVertical
+            ? Math.min(this.s(280), this.width - 32)
+            : this.s(180);
+        const cardH = stackVertical ? this.s(110) : this.s(240);
+        const gap = this.s(stackVertical ? 14 : 28);
 
         this.starterCardRects = [];
 
-        STARTER_OPTIONS.forEach((opt, i) => {
-            const cx = startX + i * (cardW + gap);
-            const cy = startY;
-            this.starterCardRects.push({ x: cx, y: cy, w: cardW, h: cardH });
+        if (stackVertical) {
+            const totalH = cardH * 3 + gap * 2;
+            const startY = Math.max(this.s(120), (this.height - totalH) / 2);
+            const startX = (this.width - cardW) / 2;
 
-            ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
-            ctx.strokeStyle = opt.color;
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.roundRect(cx, cy, cardW, cardH, 12);
-            ctx.fill();
-            ctx.stroke();
+            STARTER_OPTIONS.forEach((opt, i) => {
+                const cx = startX;
+                const cy = startY + i * (cardH + gap);
+                this.starterCardRects.push({ x: cx, y: cy, w: cardW, h: cardH });
+                this.drawCardFrame(cx, cy, cardW, cardH, opt.color, this.s(10));
 
-            ctx.font = '48px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.fillText(opt.icon, cx + cardW / 2, cy + 60);
+                // 横向布局: 左侧大图标 + 右侧文字
+                ctx.font = `${this.s(40)}px sans-serif`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillStyle = opt.color;
+                ctx.fillText(opt.icon, cx + this.s(46), cy + cardH / 2);
 
-            ctx.font = 'bold 22px sans-serif';
-            ctx.fillStyle = opt.color;
-            ctx.fillText(opt.name, cx + cardW / 2, cy + 110);
+                ctx.font = `bold ${this.s(18)}px sans-serif`;
+                ctx.textAlign = 'left';
+                ctx.fillText(opt.name, cx + this.s(92), cy + this.s(28));
 
-            ctx.font = '13px sans-serif';
-            ctx.fillStyle = '#cbd5e1';
-            this.wrapText(opt.desc, cx + cardW / 2, cy + 145, cardW - 24, 18);
-        });
+                ctx.font = `${this.s(11)}px sans-serif`;
+                ctx.fillStyle = '#cbd5e1';
+                this.wrapText(opt.desc, cx + this.s(92), cy + this.s(54),
+                              cardW - this.s(108), this.s(14), 'left');
+            });
+        } else {
+            const totalW = cardW * 3 + gap * 2;
+            const startX = (this.width - totalW) / 2;
+            const startY = (this.height - cardH) / 2;
 
-        ctx.font = '13px sans-serif';
+            STARTER_OPTIONS.forEach((opt, i) => {
+                const cx = startX + i * (cardW + gap);
+                const cy = startY;
+                this.starterCardRects.push({ x: cx, y: cy, w: cardW, h: cardH });
+                this.drawCardFrame(cx, cy, cardW, cardH, opt.color, this.s(10));
+
+                ctx.font = `${this.s(42)}px sans-serif`;
+                ctx.textAlign = 'center';
+                ctx.fillStyle = opt.color;
+                ctx.fillText(opt.icon, cx + cardW / 2, cy + this.s(54));
+
+                ctx.font = `bold ${this.s(20)}px sans-serif`;
+                ctx.fillText(opt.name, cx + cardW / 2, cy + this.s(102));
+
+                ctx.font = `${this.s(12)}px sans-serif`;
+                ctx.fillStyle = '#cbd5e1';
+                this.wrapText(opt.desc, cx + cardW / 2, cy + this.s(132),
+                              cardW - this.s(22), this.s(16));
+            });
+        }
+
+        ctx.font = `${this.s(11)}px sans-serif`;
         ctx.fillStyle = '#64748b';
         ctx.textAlign = 'center';
-        ctx.fillText('选择魔法阵后还需选择元素派系', this.width / 2, this.height - 40);
+        ctx.fillText('选择魔法阵后还需选择元素派系', this.width / 2, this.height - this.s(24));
     }
 
     hitTestStarterCards(mx: number, my: number): 'VULCAN' | 'LASER' | 'MAGIC_CIRCLE' | null {
@@ -106,61 +151,81 @@ export class RogueUI {
         ctx.fillRect(0, 0, this.width, this.height);
 
         ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 34px sans-serif';
+        ctx.font = `bold ${this.s(28)}px sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText('选择魔法阵派系', this.width / 2, 90);
+        ctx.fillText('选择魔法阵派系', this.width / 2, this.s(70));
 
-        ctx.font = '15px sans-serif';
+        ctx.font = `${this.s(12)}px sans-serif`;
         ctx.fillStyle = '#a5b4fc';
-        ctx.fillText('两种派系路线相互独立, 对应不同的专属增益', this.width / 2, 128);
+        ctx.fillText('两种派系路线相互独立, 法术池完全不同', this.width / 2, this.s(102));
 
-        const cardW = 240;
-        const cardH = 300;
-        const gap = 48;
-        const totalW = cardW * 2 + gap;
-        const startX = (this.width - totalW) / 2;
-        const startY = (this.height - cardH) / 2;
+        const stackVertical = this.isMobile;
+        const cardW = stackVertical
+            ? Math.min(this.s(300), this.width - 32)
+            : this.s(220);
+        const cardH = stackVertical ? this.s(140) : this.s(280);
+        const gap = this.s(stackVertical ? 16 : 36);
 
         this.elementCardRects = [];
         const options = [
             { key: CircleElement.FIRE, name: '火系', icon: '🔥', color: '#fb923c',
-              desc: '5种法阵自动循环施法 · 流星雨 / 火焰新星 / 熔岩飞弹 / 烈焰风暴 / 火神之锤' },
+              desc: '5 个法术: 流星雨 / 火焰新星 / 熔岩飞弹 / 烈焰风暴 / 火神之锤' },
             { key: CircleElement.ELECTRIC, name: '电系', icon: '⚡', color: '#a78bfa',
-              desc: '5种法阵自动循环施法 · 闪电链 / 天雷 / 静电场 / 电磁轨道炮 / 电浆轰炸' }
+              desc: '5 个法术: 闪电链 / 天雷 / 静电场 / 电磁轨道炮 / 电浆轰炸' }
         ];
 
-        options.forEach((opt, i) => {
-            const cx = startX + i * (cardW + gap);
-            const cy = startY;
-            this.elementCardRects.push({ x: cx, y: cy, w: cardW, h: cardH });
+        if (stackVertical) {
+            const totalH = cardH * 2 + gap;
+            const startY = Math.max(this.s(130), (this.height - totalH) / 2);
+            const startX = (this.width - cardW) / 2;
 
-            ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
-            ctx.strokeStyle = opt.color;
-            ctx.lineWidth = 2.5;
-            ctx.beginPath();
-            ctx.roundRect(cx, cy, cardW, cardH, 14);
-            ctx.fill();
-            ctx.stroke();
+            options.forEach((opt, i) => {
+                const cx = startX;
+                const cy = startY + i * (cardH + gap);
+                this.elementCardRects.push({ x: cx, y: cy, w: cardW, h: cardH });
+                this.drawCardFrame(cx, cy, cardW, cardH, opt.color, this.s(12));
 
-            // 顶部彩带
-            ctx.fillStyle = opt.color;
-            ctx.beginPath();
-            ctx.roundRect(cx, cy, cardW, 8, [14, 14, 0, 0]);
-            ctx.fill();
+                ctx.font = `${this.s(50)}px sans-serif`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillStyle = opt.color;
+                ctx.fillText(opt.icon, cx + this.s(58), cy + cardH / 2);
 
-            ctx.font = '72px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.fillText(opt.icon, cx + cardW / 2, cy + 90);
+                ctx.font = `bold ${this.s(22)}px sans-serif`;
+                ctx.textAlign = 'left';
+                ctx.fillText(opt.name, cx + this.s(112), cy + this.s(34));
 
-            ctx.font = 'bold 26px sans-serif';
-            ctx.fillStyle = opt.color;
-            ctx.fillText(opt.name, cx + cardW / 2, cy + 160);
+                ctx.font = `${this.s(11)}px sans-serif`;
+                ctx.fillStyle = '#cbd5e1';
+                this.wrapText(opt.desc, cx + this.s(112), cy + this.s(64),
+                              cardW - this.s(128), this.s(15), 'left');
+            });
+        } else {
+            const totalW = cardW * 2 + gap;
+            const startX = (this.width - totalW) / 2;
+            const startY = (this.height - cardH) / 2;
 
-            ctx.font = '14px sans-serif';
-            ctx.fillStyle = '#cbd5e1';
-            this.wrapText(opt.desc, cx + cardW / 2, cy + 205, cardW - 36, 22);
-        });
+            options.forEach((opt, i) => {
+                const cx = startX + i * (cardW + gap);
+                const cy = startY;
+                this.elementCardRects.push({ x: cx, y: cy, w: cardW, h: cardH });
+                this.drawCardFrame(cx, cy, cardW, cardH, opt.color, this.s(12));
+
+                ctx.font = `${this.s(64)}px sans-serif`;
+                ctx.textAlign = 'center';
+                ctx.fillStyle = opt.color;
+                ctx.fillText(opt.icon, cx + cardW / 2, cy + this.s(80));
+
+                ctx.font = `bold ${this.s(24)}px sans-serif`;
+                ctx.fillText(opt.name, cx + cardW / 2, cy + this.s(150));
+
+                ctx.font = `${this.s(13)}px sans-serif`;
+                ctx.fillStyle = '#cbd5e1';
+                this.wrapText(opt.desc, cx + cardW / 2, cy + this.s(190),
+                              cardW - this.s(34), this.s(20));
+            });
+        }
     }
 
     hitTestElementCards(mx: number, my: number): CircleElement | null {
@@ -181,61 +246,100 @@ export class RogueUI {
         ctx.fillRect(0, 0, this.width, this.height);
 
         ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 32px sans-serif';
+        ctx.font = `bold ${this.s(26)}px sans-serif`;
         ctx.textAlign = 'center';
-        ctx.fillText(`第 ${state.layer} 层通关!`, this.width / 2, 60);
+        ctx.textBaseline = 'middle';
+        ctx.fillText(`第 ${state.layer} 层通关!`, this.width / 2, this.s(48));
 
-        ctx.font = '18px sans-serif';
+        ctx.font = `${this.s(14)}px sans-serif`;
         ctx.fillStyle = '#a5b4fc';
-        ctx.fillText('选择一项增益', this.width / 2, 95);
+        ctx.fillText('选择一项增益', this.width / 2, this.s(78));
 
-        const cardW = 200;
-        const cardH = 280;
-        const gap = 24;
+        const stackVertical = this.isMobile;
         const count = state.perkChoices.length;
-        const totalW = cardW * count + gap * (count - 1);
-        const startX = (this.width - totalW) / 2;
-        const startY = (this.height - cardH) / 2;
+
+        const cardW = stackVertical
+            ? Math.min(this.s(300), this.width - 32)
+            : this.s(190);
+        const cardH = stackVertical ? this.s(96) : this.s(260);
+        const gap = this.s(stackVertical ? 10 : 18);
 
         this.perkCardRects = [];
 
-        state.perkChoices.forEach((perk, i) => {
-            const cx = startX + i * (cardW + gap);
-            const cy = startY;
-            this.perkCardRects.push({ x: cx, y: cy, w: cardW, h: cardH });
+        if (stackVertical) {
+            const totalH = cardH * count + gap * (count - 1);
+            const startY = Math.max(this.s(100), (this.height - totalH) / 2);
+            const startX = (this.width - cardW) / 2;
 
-            ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
-            ctx.strokeStyle = perk.color;
-            ctx.lineWidth = 2.5;
-            ctx.beginPath();
-            ctx.roundRect(cx, cy, cardW, cardH, 12);
-            ctx.fill();
-            ctx.stroke();
+            state.perkChoices.forEach((perk, i) => {
+                const cx = startX;
+                const cy = startY + i * (cardH + gap);
+                this.perkCardRects.push({ x: cx, y: cy, w: cardW, h: cardH });
+                this.drawCardFrame(cx, cy, cardW, cardH, perk.color, this.s(10));
+                ctx.fillStyle = perk.color;
+                ctx.beginPath();
+                ctx.roundRect(cx, cy, cardW, this.s(4), [this.s(10), this.s(10), 0, 0]);
+                ctx.fill();
 
-            ctx.fillStyle = perk.color;
-            ctx.beginPath();
-            ctx.roundRect(cx, cy, cardW, 6, [12, 12, 0, 0]);
-            ctx.fill();
+                ctx.font = `${this.s(28)}px sans-serif`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillStyle = perk.color;
+                ctx.fillText(perk.icon, cx + this.s(36), cy + cardH / 2);
 
-            ctx.font = '44px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.fillText(perk.icon, cx + cardW / 2, cy + 60);
+                ctx.font = `bold ${this.s(15)}px sans-serif`;
+                ctx.textAlign = 'left';
+                ctx.fillText(perk.name, cx + this.s(70), cy + this.s(28));
 
-            ctx.font = 'bold 20px sans-serif';
-            ctx.fillStyle = perk.color;
-            ctx.fillText(perk.name, cx + cardW / 2, cy + 105);
+                ctx.font = `${this.s(11)}px sans-serif`;
+                ctx.fillStyle = '#e2e8f0';
+                this.wrapText(perk.desc, cx + this.s(70), cy + this.s(52),
+                              cardW - this.s(84), this.s(14), 'left');
 
-            ctx.font = '14px sans-serif';
-            ctx.fillStyle = '#e2e8f0';
-            this.wrapText(perk.desc, cx + cardW / 2, cy + 140, cardW - 28, 20);
+                const stacks = state.perks.filter(p => p === perk.id).length;
+                if (stacks > 0) {
+                    ctx.font = `${this.s(10)}px sans-serif`;
+                    ctx.fillStyle = '#64748b';
+                    ctx.textAlign = 'right';
+                    ctx.fillText(`x${stacks}`, cx + cardW - this.s(8), cy + this.s(28));
+                }
+            });
+        } else {
+            const totalW = cardW * count + gap * (count - 1);
+            const startX = (this.width - totalW) / 2;
+            const startY = (this.height - cardH) / 2;
 
-            const stacks = state.perks.filter(p => p === perk.id).length;
-            if (stacks > 0) {
-                ctx.font = '12px sans-serif';
-                ctx.fillStyle = '#64748b';
-                ctx.fillText(`已拥有 x${stacks}`, cx + cardW / 2, cy + cardH - 20);
-            }
-        });
+            state.perkChoices.forEach((perk, i) => {
+                const cx = startX + i * (cardW + gap);
+                const cy = startY;
+                this.perkCardRects.push({ x: cx, y: cy, w: cardW, h: cardH });
+                this.drawCardFrame(cx, cy, cardW, cardH, perk.color, this.s(10));
+                ctx.fillStyle = perk.color;
+                ctx.beginPath();
+                ctx.roundRect(cx, cy, cardW, this.s(5), [this.s(10), this.s(10), 0, 0]);
+                ctx.fill();
+
+                ctx.font = `${this.s(40)}px sans-serif`;
+                ctx.textAlign = 'center';
+                ctx.fillText(perk.icon, cx + cardW / 2, cy + this.s(52));
+
+                ctx.font = `bold ${this.s(18)}px sans-serif`;
+                ctx.fillStyle = perk.color;
+                ctx.fillText(perk.name, cx + cardW / 2, cy + this.s(96));
+
+                ctx.font = `${this.s(13)}px sans-serif`;
+                ctx.fillStyle = '#e2e8f0';
+                this.wrapText(perk.desc, cx + cardW / 2, cy + this.s(128),
+                              cardW - this.s(26), this.s(18));
+
+                const stacks = state.perks.filter(p => p === perk.id).length;
+                if (stacks > 0) {
+                    ctx.font = `${this.s(11)}px sans-serif`;
+                    ctx.fillStyle = '#64748b';
+                    ctx.fillText(`已拥有 x${stacks}`, cx + cardW / 2, cy + cardH - this.s(18));
+                }
+            });
+        }
     }
 
     hitTestPerkCards(mx: number, my: number, count: number): number | null {
@@ -253,23 +357,22 @@ export class RogueUI {
         const ctx = this.ctx;
 
         // ========== 顶部: 层数 + Boss 血条 ==========
-        // 层数徽章 (左上)
-        const badgeX = 16, badgeY = 12;
-        const badgeW = 110, badgeH = 32;
+        const badgeX = this.s(12), badgeY = this.s(10);
+        const badgeW = this.s(96), badgeH = this.s(26);
         ctx.fillStyle = 'rgba(3, 7, 18, 0.85)';
         ctx.strokeStyle = 'rgba(244, 114, 182, 0.6)';
         ctx.lineWidth = 1.5;
         ctx.beginPath();
-        ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 6);
+        ctx.roundRect(badgeX, badgeY, badgeW, badgeH, this.s(5));
         ctx.fill();
         ctx.stroke();
         ctx.fillStyle = '#f472b6';
-        ctx.font = 'bold 13px sans-serif';
+        ctx.font = `bold ${this.s(11)}px sans-serif`;
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
-        ctx.fillText(`LAYER ${state.layer} · ∞`, badgeX + 10, badgeY + badgeH / 2);
+        ctx.fillText(`LAYER ${state.layer} · ∞`, badgeX + this.s(8), badgeY + badgeH / 2);
 
-        // Boss 血条 (屏幕顶部中央)
+        // Boss 血条
         if (boss && !boss.markedForDeletion && boss.position.y > -50) {
             this.drawBossBar(boss);
         }
@@ -283,7 +386,8 @@ export class RogueUI {
             this.drawPlayerStatBars(player);
         }
 
-        // ========== 右下: 技能 (已解锁的) ==========
+        // ========== 右下: 主动技能 (已解锁的) ==========
+        // 注意: 法术轮由 React HUD 绘制 (App.tsx), 不在这里画
         if (player) {
             this.drawSkillBadges(state, player);
         }
@@ -291,21 +395,21 @@ export class RogueUI {
 
     private drawBossBar(boss: Enemy) {
         const ctx = this.ctx;
-        const w = Math.min(520, this.width - 280); // 留空给两侧 UI
-        const h = 16;
+        // 移动端 Boss 条窄一些, 让两侧 UI 不重叠
+        const reserve = this.isMobile ? this.s(180) : this.s(280);
+        const w = Math.min(this.s(440), this.width - reserve);
+        const h = this.s(13);
         const x = (this.width - w) / 2;
-        const y = 16;
+        const y = this.s(12);
 
-        // 背景
         ctx.fillStyle = 'rgba(3, 7, 18, 0.9)';
         ctx.strokeStyle = 'rgba(239, 68, 68, 0.7)';
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.roundRect(x, y, w, h, 4);
+        ctx.roundRect(x, y, w, h, this.s(3));
         ctx.fill();
         ctx.stroke();
 
-        // 血量填充
         const ratio = Math.max(0, Math.min(1, boss.health / boss.maxHealth));
         const grad = ctx.createLinearGradient(x, 0, x + w, 0);
         grad.addColorStop(0, '#7f1d1d');
@@ -313,23 +417,21 @@ export class RogueUI {
         ctx.fillStyle = grad;
         ctx.fillRect(x + 2, y + 2, (w - 4) * ratio, h - 4);
 
-        // 标题
         ctx.fillStyle = '#fecaca';
-        ctx.font = 'bold 12px sans-serif';
+        ctx.font = `bold ${this.s(10)}px sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(
-            `BOSS · ${Math.ceil(boss.health)} / ${Math.ceil(boss.maxHealth)}`,
-            x + w / 2,
-            y + h / 2
-        );
+        const txt = this.isMobile
+            ? `BOSS · ${Math.ceil(boss.health)}/${Math.ceil(boss.maxHealth)}`
+            : `BOSS · ${Math.ceil(boss.health)} / ${Math.ceil(boss.maxHealth)}`;
+        ctx.fillText(txt, x + w / 2, y + h / 2);
     }
 
     private drawWeaponBadge(state: RogueState) {
         const ctx = this.ctx;
-        const w = 120, h = 32;
-        const x = this.width - w - 16;
-        const y = 12;
+        const w = this.s(108), h = this.s(26);
+        const x = this.width - w - this.s(12);
+        const y = this.s(10);
 
         let icon = '🔫', name = 'VULCAN', color = '#facc15';
         if (state.starterWeapon === 'LASER') { icon = '⚡'; name = 'LASER'; color = '#38bdf8'; }
@@ -342,18 +444,18 @@ export class RogueUI {
         ctx.strokeStyle = color + 'aa';
         ctx.lineWidth = 1.5;
         ctx.beginPath();
-        ctx.roundRect(x, y, w, h, 6);
+        ctx.roundRect(x, y, w, h, this.s(5));
         ctx.fill();
         ctx.stroke();
 
-        ctx.font = '16px sans-serif';
+        ctx.font = `${this.s(14)}px sans-serif`;
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
-        ctx.fillText(icon, x + 8, y + h / 2);
+        ctx.fillText(icon, x + this.s(7), y + h / 2);
 
-        ctx.font = 'bold 11px sans-serif';
+        ctx.font = `bold ${this.s(10)}px sans-serif`;
         ctx.fillStyle = color;
-        ctx.fillText(name, x + 32, y + h / 2);
+        ctx.fillText(name, x + this.s(28), y + h / 2);
     }
 
     /** 右上: 已拥有的 Perks, 按 id 聚合后显示图标 + 层数 */
@@ -361,20 +463,18 @@ export class RogueUI {
         const ctx = this.ctx;
         if (state.perks.length === 0) return;
 
-        // 聚合
         const counts = new Map<PerkId, number>();
         for (const p of state.perks) counts.set(p, (counts.get(p) || 0) + 1);
         const lookup = new Map<PerkId, PerkDef>();
         for (const def of PERK_POOL) lookup.set(def.id, def);
 
-        // 位置: 武器徽章下方
-        const startX = this.width - 16;
-        const startY = 52;
-        const iconSize = 28;
-        const gap = 4;
+        const startX = this.width - this.s(12);
+        const startY = this.s(42);
+        const iconSize = this.s(24);
+        const gap = this.s(3);
 
-        // 每行 6 个
-        const perRow = 6;
+        // 移动端每行 4 个, 桌面 6 个
+        const perRow = this.isMobile ? 4 : 6;
         let idx = 0;
         const entries = Array.from(counts.entries());
         entries.forEach(([id, count]) => {
@@ -385,28 +485,25 @@ export class RogueUI {
             const x = startX - (col + 1) * (iconSize + gap);
             const y = startY + row * (iconSize + gap);
 
-            // 格子底
             ctx.fillStyle = 'rgba(3, 7, 18, 0.9)';
             ctx.strokeStyle = def.color + 'aa';
-            ctx.lineWidth = 1.5;
+            ctx.lineWidth = 1.2;
             ctx.beginPath();
-            ctx.roundRect(x, y, iconSize, iconSize, 4);
+            ctx.roundRect(x, y, iconSize, iconSize, this.s(3));
             ctx.fill();
             ctx.stroke();
 
-            // 图标
-            ctx.font = '16px sans-serif';
+            ctx.font = `${this.s(14)}px sans-serif`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillText(def.icon, x + iconSize / 2, y + iconSize / 2);
 
-            // 层数角标
             if (count > 1) {
                 ctx.fillStyle = def.color;
-                ctx.fillRect(x + iconSize - 10, y + iconSize - 10, 10, 10);
+                ctx.fillRect(x + iconSize - this.s(9), y + iconSize - this.s(9), this.s(9), this.s(9));
                 ctx.fillStyle = '#000';
-                ctx.font = 'bold 9px sans-serif';
-                ctx.fillText(String(count), x + iconSize - 5, y + iconSize - 5);
+                ctx.font = `bold ${this.s(8)}px sans-serif`;
+                ctx.fillText(String(count), x + iconSize - this.s(4.5), y + iconSize - this.s(4.5));
             }
             idx++;
         });
@@ -414,17 +511,15 @@ export class RogueUI {
 
     private drawPlayerStatBars(player: Player) {
         const ctx = this.ctx;
-        const barW = 200, barH = 12;
-        const x = 16;
-        const baseY = this.height - 60;
+        const barW = this.isMobile ? this.s(150) : this.s(180);
+        const barH = this.s(10);
+        const x = this.s(12);
+        const baseY = this.height - this.s(50);
 
-        // HP
         this.drawStatBar(x, baseY, barW, barH,
             player.health, player.maxHealth,
             '#22c55e', '#166534', 'HP');
-
-        // MP
-        this.drawStatBar(x, baseY + 24, barW, barH,
+        this.drawStatBar(x, baseY + this.s(20), barW, barH,
             player.mana, player.maxMana,
             '#60a5fa', '#1e3a8a', 'MP');
     }
@@ -449,10 +544,10 @@ export class RogueUI {
         ctx.fillRect(x + 1, y + 1, (w - 2) * ratio, h - 2);
 
         ctx.fillStyle = '#fff';
-        ctx.font = 'bold 10px sans-serif';
+        ctx.font = `bold ${this.s(9)}px sans-serif`;
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
-        ctx.fillText(`${label} ${Math.ceil(value)}/${Math.floor(max)}`, x + 6, y + h / 2);
+        ctx.fillText(`${label} ${Math.ceil(value)}/${Math.floor(max)}`, x + this.s(5), y + h / 2);
     }
 
     private drawSkillBadges(state: RogueState, player: Player) {
@@ -463,10 +558,11 @@ export class RogueUI {
             { key: 'shockwave', hasFlag: state.modifiers.hasShockwave, icon: '💫', color: '#fbbf24', hotkey: '3', name: '冲击' },
         ];
 
-        const btnSize = 44;
-        const gap = 8;
-        const startX = this.width - 16 - btnSize;
-        const startY = this.height - btnSize - 16;
+        const btnSize = this.s(38);
+        const gap = this.s(6);
+        const startX = this.width - this.s(12) - btnSize;
+        // 给法术轮 (React HUD) 留出底部空间; 主动技能往上挪
+        const startY = this.height - btnSize - this.s(80);
 
         let drawn = 0;
         for (let i = skills.length - 1; i >= 0; i--) {
@@ -480,38 +576,34 @@ export class RogueUI {
             const y = startY;
             drawn++;
 
-            // 底
             ctx.fillStyle = 'rgba(3, 7, 18, 0.9)';
             ctx.strokeStyle = isReady ? s.color : '#444';
             ctx.lineWidth = 2;
             ctx.beginPath();
-            ctx.roundRect(x, y, btnSize, btnSize, 8);
+            ctx.roundRect(x, y, btnSize, btnSize, this.s(7));
             ctx.fill();
             ctx.stroke();
 
-            // 图标
-            ctx.font = '20px sans-serif';
+            ctx.font = `${this.s(18)}px sans-serif`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.globalAlpha = isReady ? 1 : 0.4;
             ctx.fillText(s.icon, x + btnSize / 2, y + btnSize / 2);
             ctx.globalAlpha = 1;
 
-            // 冷却覆盖
             if (!isReady) {
                 ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
                 ctx.fillRect(x + 2, y + 2, btnSize - 4, (btnSize - 4) * ratio);
                 ctx.fillStyle = '#fff';
-                ctx.font = 'bold 12px sans-serif';
+                ctx.font = `bold ${this.s(11)}px sans-serif`;
                 ctx.fillText(Math.ceil(cd.current).toString(), x + btnSize / 2, y + btnSize / 2);
             }
 
-            // 快捷键角标
             ctx.fillStyle = s.color;
-            ctx.fillRect(x + btnSize - 14, y - 2, 14, 14);
+            ctx.fillRect(x + btnSize - this.s(12), y - this.s(2), this.s(12), this.s(12));
             ctx.fillStyle = '#000';
-            ctx.font = 'bold 10px sans-serif';
-            ctx.fillText(s.hotkey, x + btnSize - 7, y + 5);
+            ctx.font = `bold ${this.s(9)}px sans-serif`;
+            ctx.fillText(s.hotkey, x + btnSize - this.s(6), y + this.s(4));
         }
     }
 
@@ -523,22 +615,38 @@ export class RogueUI {
 
         ctx.textAlign = 'center';
         ctx.fillStyle = victory ? '#4ade80' : '#f87171';
-        ctx.font = 'bold 42px sans-serif';
+        ctx.font = `bold ${this.s(38)}px sans-serif`;
         ctx.textBaseline = 'middle';
-        ctx.fillText(victory ? '通关!' : '阵亡', this.width / 2, this.height / 2 - 40);
+        ctx.fillText(victory ? '通关!' : '阵亡', this.width / 2, this.height / 2 - this.s(36));
 
         ctx.fillStyle = '#e2e8f0';
-        ctx.font = '20px sans-serif';
-        ctx.fillText(`到达第 ${state.layer} 层 · 获得 ${state.perks.length} 个增益`, this.width / 2, this.height / 2 + 10);
+        ctx.font = `${this.s(16)}px sans-serif`;
+        ctx.fillText(`到达第 ${state.layer} 层 · 获得 ${state.perks.length} 个增益`,
+                     this.width / 2, this.height / 2 + this.s(8));
 
         ctx.fillStyle = '#64748b';
-        ctx.font = '16px sans-serif';
-        ctx.fillText('点击任意位置返回主菜单', this.width / 2, this.height / 2 + 60);
+        ctx.font = `${this.s(13)}px sans-serif`;
+        ctx.fillText('点击任意位置返回主菜单',
+                     this.width / 2, this.height / 2 + this.s(50));
     }
 
     // ================== 工具 ==================
-    private wrapText(text: string, x: number, y: number, maxWidth: number, lineHeight: number) {
+    /** 卡片底框 (统一样式) */
+    private drawCardFrame(x: number, y: number, w: number, h: number, color: string, radius: number) {
         const ctx = this.ctx;
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.roundRect(x, y, w, h, radius);
+        ctx.fill();
+        ctx.stroke();
+    }
+
+    private wrapText(text: string, x: number, y: number, maxWidth: number, lineHeight: number,
+                     align: CanvasTextAlign = 'center') {
+        const ctx = this.ctx;
+        ctx.textAlign = align;
         const chars = text.split('');
         let line = '';
         let lineY = y;

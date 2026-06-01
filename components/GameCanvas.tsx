@@ -54,22 +54,37 @@ export const GameCanvas = forwardRef<GameRef, GameCanvasProps>(({
   };
 
   useImperativeHandle(ref, () => ({
-    switchWeapon: () => engineRef.current?.triggerWeaponSwitch(),
+    switchWeapon: () => {
+      // 在肉鸽模式下, switchWeapon = 切换魔法阵当前选中的法术
+      if (rogueRef.current && engineRef.current?.state === GameState.ROGUE) {
+        rogueRef.current.triggerWeaponSwitch();
+      } else {
+        engineRef.current?.triggerWeaponSwitch();
+      }
+    },
     triggerSkill: (index: number) => engineRef.current?.triggerSkill(index),
     getPlayerState: () => engineRef.current ? engineRef.current.getPlayerState() : null,
     updateSettings: (settings: GameSettings) => engineRef.current?.updateSettings(settings),
     markUITouch: (id: number) => engineRef.current?.input.markUITouch(id),
     unmarkUITouch: (id: number) => engineRef.current?.input.unmarkUITouch(id),
-    getJoystickState: () => engineRef.current
-      ? engineRef.current.input.getJoystickState()
-      : { active: false, base: { x: 0, y: 0 }, knob: { x: 0, y: 0 } },
+    getJoystickState: () => {
+      // 肉鸽模式有自己的 InputManager 实例
+      if (rogueRef.current && engineRef.current?.state === GameState.ROGUE) {
+        return rogueRef.current.input.getJoystickState();
+      }
+      return engineRef.current
+        ? engineRef.current.input.getJoystickState()
+        : { active: false, base: { x: 0, y: 0 }, knob: { x: 0, y: 0 } };
+    },
     startPractice: () => engineRef.current?.startPractice(),
     stopPractice: () => engineRef.current?.stopPractice(),
     spawnPracticeBot: (kind: BotKind) => engineRef.current?.spawnPracticeBot(kind),
     clearPracticeBots: () => engineRef.current?.clearPracticeBots(),
     selectWeapon: (w: WeaponType) => engineRef.current?.selectWeapon(w),
     startRogue,
-    stopRogue
+    stopRogue,
+    getMagicState: () => rogueRef.current ? rogueRef.current.getMagicState() : null,
+    selectMagicSpell: (i: number) => rogueRef.current?.triggerSpellByIndex(i),
   }));
 
   useEffect(() => {

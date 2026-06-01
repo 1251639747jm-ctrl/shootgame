@@ -87,16 +87,30 @@ const App: React.FC = () => {
 
   const gameRef = useRef<GameRef>(null);
 
+  // Magic spell wheel state (Rogue + 魔法阵 only)
+  const [magicState, setMagicState] = useState<null | {
+    element: 'FIRE' | 'ELECTRIC';
+    currentIndex: number;
+    skills: Array<{ id: string; name: string; color: string; cooldown: number; cooldownMax: number; castTime: number; }>;
+    casting: { index: number; progress: number } | null;
+  }>(null);
+
   useEffect(() => {
-    if (gameState !== GameState.PLAYING && gameState !== GameState.PRACTICE) return;
+    if (gameState !== GameState.PLAYING && gameState !== GameState.PRACTICE && gameState !== GameState.ROGUE) return;
     const interval = setInterval(() => {
       if (gameRef.current) {
         const s = gameRef.current.getPlayerState();
         if (s) setPlayerState(s);
         setJoystick(gameRef.current.getJoystickState());
+        if (gameState === GameState.ROGUE) {
+          setMagicState(gameRef.current.getMagicState());
+        } else if (magicState !== null) {
+          setMagicState(null);
+        }
       }
     }, 50);
     return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gameState]);
 
   useEffect(() => {
@@ -162,7 +176,7 @@ const App: React.FC = () => {
         {...btnProps}
         disabled={!isReady}
         data-ui-button="skill"
-        className={`relative flex items-center justify-center w-[68px] h-[68px] rounded-full transition-transform ${isReady ? 'active:scale-90 hover:scale-105' : 'opacity-85'}`}
+        className={`relative flex items-center justify-center w-[56px] h-[56px] sm:w-[68px] sm:h-[68px] rounded-full transition-transform ${isReady ? 'active:scale-90 hover:scale-105' : 'opacity-85'}`}
         style={{
           background: `radial-gradient(circle at 30% 30%, rgba(20,30,60,0.95), rgba(0,0,0,0.85))`,
           boxShadow: isActive
@@ -176,7 +190,7 @@ const App: React.FC = () => {
       >
         {/* 冷却扇形环 (SVG) */}
         {!isReady && (
-          <svg className="absolute inset-0 -rotate-90" width="68" height="68" viewBox="0 0 68 68">
+          <svg className="absolute inset-0 -rotate-90" width="100%" height="100%" viewBox="0 0 68 68">
             <circle cx="34" cy="34" r="30" stroke="rgba(0,0,0,0.75)" strokeWidth="4" fill="none" />
             <circle
               cx="34" cy="34" r="30"
@@ -190,16 +204,16 @@ const App: React.FC = () => {
         )}
 
         {!isReady && (
-          <span className="absolute z-20 text-white font-bold text-base drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)]">
+          <span className="absolute z-20 text-white font-bold text-sm sm:text-base drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)]">
             {Math.ceil(playerState?.skills[skillKey].current || 0)}
           </span>
         )}
 
-        <Icon size={30} active={isReady} />
+        <Icon size={26} active={isReady} />
 
         {/* 数字快捷键角标 */}
         <span
-          className="absolute -top-1 -right-1 w-5 h-5 rounded-full text-[10px] font-black flex items-center justify-center"
+          className="absolute -top-1 -right-1 w-4 h-4 sm:w-5 sm:h-5 rounded-full text-[9px] sm:text-[10px] font-black flex items-center justify-center"
           style={{
             background: `linear-gradient(135deg, ${color}, rgba(0,0,0,0.9))`,
             color: '#fff',
@@ -224,7 +238,7 @@ const App: React.FC = () => {
         {...btnProps}
         data-ui-button="weapon"
         style={{ touchAction: 'none' }}
-        className="relative w-28 h-28 group"
+        className="relative w-[88px] h-[88px] sm:w-28 sm:h-28 group"
       >
         {/* 六角形背景 */}
         <svg viewBox="0 0 100 100" className="absolute inset-0 w-full h-full drop-shadow-[0_0_12px_rgba(0,255,255,0.25)]">
@@ -249,8 +263,8 @@ const App: React.FC = () => {
           />
         </svg>
         <div className="relative z-10 flex flex-col items-center justify-center h-full">
-          <meta.Icon size={36} active />
-          <span className="text-[9px] font-bold tracking-[0.15em] mt-1" style={{ color: meta.color, textShadow: `0 0 4px ${meta.color}80` }}>
+          <meta.Icon size={30} active />
+          <span className="text-[8px] sm:text-[9px] font-bold tracking-[0.15em] mt-1" style={{ color: meta.color, textShadow: `0 0 4px ${meta.color}80` }}>
             {meta.label}
           </span>
         </div>
@@ -442,8 +456,7 @@ const App: React.FC = () => {
             </div>
 
             {/* 右上: 血量 + 能量 */}
-            <div className="flex flex-col gap-1.5 w-60">
-              <StatBar
+            <div className="flex flex-col gap-1.5 w-44 sm:w-60">              <StatBar
                 label="ARMOR" icon={<ArmorIcon size={14} active />}
                 value={health} max={playerState?.maxHealth || 100}
                 color="#f87171" color2="#7f1d1d" criticalPulse
@@ -467,14 +480,14 @@ const App: React.FC = () => {
           </div>
 
           {/* 底部中央: 技能按钮 */}
-          <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex gap-3 z-20">
+          <div className="absolute bottom-4 sm:bottom-8 left-1/2 -translate-x-1/2 flex gap-2 sm:gap-3 z-20">
             <SkillButton index={1} Icon={ShieldSkillIcon} label="SHIELD"    skillKey="shield"    hotkey="1" color="#60a5fa" />
             <SkillButton index={2} Icon={BlackHoleIcon}   label="SINGULAR"  skillKey="blackhole" hotkey="2" color="#818cf8" />
             <SkillButton index={3} Icon={ShockwaveIcon}   label="SHOCKWAVE" skillKey="shockwave" hotkey="3" color="#fbbf24" />
           </div>
 
           {/* 底部右: 武器按钮 */}
-          <div className="absolute bottom-6 right-4 z-20">
+          <div className="absolute bottom-3 right-2 sm:bottom-6 sm:right-4 z-20">
             <WeaponButton />
           </div>
         </>
@@ -492,21 +505,44 @@ const App: React.FC = () => {
         />
       )}
 
-      {/* =============== 肉鸽模式顶栏 (Canvas 自己绘 UI, 这里只提供退出按钮) =============== */}
+      {/* =============== 肉鸽模式 HUD =============== */}
       {gameState === GameState.ROGUE && (
-        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 pointer-events-none">
-          <div className="pointer-events-auto flex items-center gap-2 px-3 py-1.5 rounded border border-pink-500/50 bg-[rgba(30,5,30,0.85)] backdrop-blur-md shadow-[0_0_14px_rgba(244,114,182,0.3)]">
-            <SwordsIcon size={14} active />
-            <span className="text-[11px] font-black tracking-[0.3em] text-pink-200">ROGUE RUN</span>
+        <>
+          {/* 顶栏: 标识 + EXIT */}
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1.5 pointer-events-none">
+            <div className="pointer-events-auto flex items-center gap-1.5 px-2 py-1 sm:px-3 sm:py-1.5 rounded border border-pink-500/50 bg-[rgba(30,5,30,0.85)] backdrop-blur-md shadow-[0_0_14px_rgba(244,114,182,0.3)]">
+              <SwordsIcon size={12} active />
+              <span className="text-[10px] sm:text-[11px] font-black tracking-[0.25em] sm:tracking-[0.3em] text-pink-200">ROGUE</span>
+            </div>
+            <button
+              onClick={handleExitRogue}
+              className="pointer-events-auto flex items-center gap-1 px-2 py-1 sm:px-3 sm:py-1.5 rounded border border-red-500/50 bg-[rgba(60,10,10,0.8)] hover:bg-red-900/70 text-red-100 text-[10px] sm:text-[11px] font-bold tracking-wider active:scale-95 transition backdrop-blur-md"
+            >
+              <ExitIcon size={12} />
+              EXIT
+            </button>
           </div>
-          <button
-            onClick={handleExitRogue}
-            className="pointer-events-auto flex items-center gap-1 px-3 py-1.5 rounded border border-red-500/50 bg-[rgba(60,10,10,0.8)] hover:bg-red-900/70 text-red-100 text-[11px] font-bold tracking-wider active:scale-95 transition backdrop-blur-md"
-          >
-            <ExitIcon size={14} />
-            EXIT
-          </button>
-        </div>
+
+          {/* 摇杆 */}
+          <Joystick />
+
+          {/* 操作提示 (仅在没有蓄力法术时显示) */}
+          {magicState && !magicState.casting && (
+            <div className="absolute bottom-1 left-1/2 -translate-x-1/2 z-10 text-[9px] sm:text-[10px] text-violet-200/40 font-bold tracking-widest pointer-events-none whitespace-nowrap">
+              长按开火释放 · Q / 武器键切换法术
+            </div>
+          )}
+
+          {/* 法术轮: 5 个法术按钮 (魔法阵专属) */}
+          {magicState && (
+            <SpellWheel
+              gameRef={gameRef}
+              magicState={magicState}
+              onSelect={(i) => gameRef.current?.selectMagicSpell(i)}
+              useUIButtonProps={useUIButtonProps}
+            />
+          )}
+        </>
       )}
 
       {/* =============== 主菜单 =============== */}
@@ -624,8 +660,151 @@ const MenuButton: React.FC<{
 );
 
 // =====================================================================
-// 练习场 HUD
+// 法术轮 (肉鸽 · 魔法阵专属)
+//   - 显示 5 个法术按钮 (圆形, 排成弧形/排在屏幕底部中间)
+//   - 当前选中: 高亮 + 白色边框
+//   - 冷却: 圆形遮罩 + 倒计时数字
+//   - 蓄力中: 边框旋转 + 进度环
+//   - 点击: 切换到该法术 (selectMagicSpell)
 // =====================================================================
+const SpellWheel: React.FC<{
+  gameRef: React.RefObject<GameRef>;
+  magicState: NonNullable<ReturnType<NonNullable<React.RefObject<GameRef>['current']>['getMagicState']>>;
+  onSelect: (i: number) => void;
+  useUIButtonProps: UseUIBtnPropsFn;
+}> = ({ gameRef, magicState, onSelect, useUIButtonProps }) => {
+  return (
+    <div className="absolute bottom-3 sm:bottom-5 left-1/2 -translate-x-1/2 z-20 flex gap-1.5 sm:gap-2 pointer-events-none">
+      {magicState.skills.map((spell, i) => (
+        <SpellSlot
+          key={spell.id}
+          gameRef={gameRef}
+          index={i}
+          spell={spell}
+          isSelected={magicState.currentIndex === i}
+          casting={magicState.casting && magicState.casting.index === i ? magicState.casting.progress : null}
+          onSelect={onSelect}
+          useUIButtonProps={useUIButtonProps}
+        />
+      ))}
+    </div>
+  );
+};
+
+const SpellSlot: React.FC<{
+  gameRef: React.RefObject<GameRef>;
+  index: number;
+  spell: { id: string; name: string; color: string; cooldown: number; cooldownMax: number; castTime: number; };
+  isSelected: boolean;
+  casting: number | null;  // 0..1 进度, null = 没在蓄力
+  onSelect: (i: number) => void;
+  useUIButtonProps: UseUIBtnPropsFn;
+}> = ({ gameRef, index, spell, isSelected, casting, onSelect, useUIButtonProps }) => {
+  const btnProps = useUIButtonProps(gameRef, () => onSelect(index));
+  const isReady = spell.cooldown <= 0;
+  const cdRatio = isReady ? 0 : Math.min(1, spell.cooldown / Math.max(0.001, spell.cooldownMax));
+
+  // 用一个简单的 emoji 表示每个法术 (与 RogueTypes 中 runeStyle 对应顺序)
+  const SPELL_ICONS: Record<string, string> = {
+    'FIRE_METEOR':  '☄️',
+    'FIRE_NOVA':    '🌋',
+    'FIRE_MAGMA':   '🪨',
+    'FIRE_INFERNO': '🔥',
+    'FIRE_HAMMER':  '🔨',
+    'ELEC_CHAIN':   '⚡',
+    'ELEC_THUNDER': '🌩️',
+    'ELEC_STATIC':  '🌀',
+    'ELEC_RAILGUN': '🎯',
+    'ELEC_PLASMA':  '🔮',
+  };
+  const icon = SPELL_ICONS[spell.id] ?? '✨';
+
+  // SVG 圆 (用于绘制冷却环和蓄力环)
+  const SIZE_DESKTOP = 56;
+  const SIZE_MOBILE = 44;
+  const RADIUS = 24; // 与 viewBox 60 匹配
+  const CIRC = 2 * Math.PI * RADIUS;
+
+  return (
+    <button
+      {...btnProps}
+      data-ui-button="spell"
+      className={`pointer-events-auto relative flex items-center justify-center rounded-full transition-all
+        w-[44px] h-[44px] sm:w-[56px] sm:h-[56px]
+        ${isSelected ? 'scale-110' : 'active:scale-90 hover:scale-105'}`}
+      style={{
+        background: `radial-gradient(circle at 30% 30%, rgba(20,20,40,0.95), rgba(0,0,0,0.85))`,
+        border: `2px solid ${isSelected ? '#ffffff' : (isReady ? spell.color : '#555')}`,
+        boxShadow: isSelected
+          ? `0 0 16px ${spell.color}, 0 0 24px rgba(255,255,255,0.4)`
+          : isReady
+            ? `0 0 8px ${spell.color}66`
+            : 'inset 0 0 6px rgba(0,0,0,0.6)',
+        touchAction: 'none',
+      }}
+      title={spell.name}
+    >
+      {/* 冷却环 / 蓄力环 (SVG) */}
+      <svg className="absolute inset-0 -rotate-90 pointer-events-none" viewBox="0 0 60 60">
+        {/* 冷却环 (灰底+主色填充递减) */}
+        {!isReady && (
+          <>
+            <circle cx="30" cy="30" r={RADIUS} stroke="rgba(0,0,0,0.6)" strokeWidth="3" fill="none" />
+            <circle
+              cx="30" cy="30" r={RADIUS}
+              stroke={spell.color} strokeWidth="3" fill="none"
+              strokeDasharray={CIRC}
+              strokeDashoffset={CIRC * (1 - cdRatio)}
+              strokeLinecap="round"
+              opacity="0.55"
+            />
+          </>
+        )}
+        {/* 蓄力环 (白色亮线) */}
+        {casting !== null && (
+          <circle
+            cx="30" cy="30" r={RADIUS}
+            stroke="#fff" strokeWidth="3" fill="none"
+            strokeDasharray={CIRC}
+            strokeDashoffset={CIRC * (1 - casting)}
+            strokeLinecap="round"
+            style={{ filter: `drop-shadow(0 0 6px ${spell.color})` }}
+          />
+        )}
+      </svg>
+
+      {/* 冷却倒计时数字 */}
+      {!isReady && (
+        <span className="absolute z-20 text-white font-bold text-xs sm:text-sm drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]">
+          {spell.cooldown >= 1 ? Math.ceil(spell.cooldown) : spell.cooldown.toFixed(1)}
+        </span>
+      )}
+
+      {/* 法术 emoji */}
+      <span
+        className="text-base sm:text-xl"
+        style={{ opacity: isReady ? 1 : 0.4, filter: isSelected ? 'brightness(1.4)' : 'none' }}
+      >
+        {icon}
+      </span>
+
+      {/* 当前选中指示 (顶部小三角) */}
+      {isSelected && (
+        <div
+          className="absolute -top-1.5 left-1/2 -translate-x-1/2 w-0 h-0 pointer-events-none"
+          style={{
+            borderLeft: '5px solid transparent',
+            borderRight: '5px solid transparent',
+            borderTop: `6px solid ${spell.color}`,
+            filter: `drop-shadow(0 0 4px ${spell.color})`
+          }}
+        />
+      )}
+    </button>
+  );
+};
+
+
 type UseUIBtnPropsFn = (
   gameRef: React.RefObject<GameRef>,
   onPress: () => void,
@@ -652,6 +831,9 @@ const WEAPON_ORDER_UI: WeaponType[] = [
   WeaponType.BOMB, WeaponType.FLAK, WeaponType.HELIX
 ];
 
+// =====================================================================
+// 练习场 HUD
+// =====================================================================
 const PracticeHUD: React.FC<{
   gameRef: React.RefObject<GameRef>;
   playerState: PlayerState | null;
