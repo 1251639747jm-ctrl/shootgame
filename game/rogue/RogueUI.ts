@@ -514,7 +514,9 @@ export class RogueUI {
         const barW = this.isMobile ? this.s(150) : this.s(180);
         const barH = this.s(10);
         const x = this.s(12);
-        const baseY = this.height - this.s(50);
+        // 移动端: 给底部地址栏 + 法术轮预留更多空间, 状态条上移
+        const bottomReserve = this.isMobile ? this.s(120) : this.s(50);
+        const baseY = this.height - bottomReserve;
 
         this.drawStatBar(x, baseY, barW, barH,
             player.health, player.maxHealth,
@@ -561,8 +563,9 @@ export class RogueUI {
         const btnSize = this.s(38);
         const gap = this.s(6);
         const startX = this.width - this.s(12) - btnSize;
-        // 给法术轮 (React HUD) 留出底部空间; 主动技能往上挪
-        const startY = this.height - btnSize - this.s(80);
+        // 给法术轮 (React HUD) + 浏览器底部地址栏留出底部空间
+        const bottomReserve = this.isMobile ? this.s(130) : this.s(80);
+        const startY = this.height - btnSize - bottomReserve;
 
         let drawn = 0;
         for (let i = skills.length - 1; i >= 0; i--) {

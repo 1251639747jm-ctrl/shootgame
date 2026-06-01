@@ -480,14 +480,14 @@ const App: React.FC = () => {
           </div>
 
           {/* 底部中央: 技能按钮 */}
-          <div className="absolute bottom-4 sm:bottom-8 left-1/2 -translate-x-1/2 flex gap-2 sm:gap-3 z-20">
+          <div className="absolute bottom-[max(20px,env(safe-area-inset-bottom))] sm:bottom-8 left-1/2 -translate-x-1/2 flex gap-2 sm:gap-3 z-20">
             <SkillButton index={1} Icon={ShieldSkillIcon} label="SHIELD"    skillKey="shield"    hotkey="1" color="#60a5fa" />
             <SkillButton index={2} Icon={BlackHoleIcon}   label="SINGULAR"  skillKey="blackhole" hotkey="2" color="#818cf8" />
             <SkillButton index={3} Icon={ShockwaveIcon}   label="SHOCKWAVE" skillKey="shockwave" hotkey="3" color="#fbbf24" />
           </div>
 
           {/* 底部右: 武器按钮 */}
-          <div className="absolute bottom-3 right-2 sm:bottom-6 sm:right-4 z-20">
+          <div className="absolute bottom-[max(16px,env(safe-area-inset-bottom))] right-2 sm:bottom-6 sm:right-4 z-20">
             <WeaponButton />
           </div>
         </>
@@ -528,7 +528,7 @@ const App: React.FC = () => {
 
           {/* 操作提示 (仅在没有蓄力法术时显示) */}
           {magicState && !magicState.casting && (
-            <div className="absolute bottom-1 left-1/2 -translate-x-1/2 z-10 text-[9px] sm:text-[10px] text-violet-200/40 font-bold tracking-widest pointer-events-none whitespace-nowrap">
+            <div className="absolute bottom-[88px] sm:bottom-1 left-1/2 -translate-x-1/2 z-10 text-[9px] sm:text-[10px] text-violet-200/40 font-bold tracking-widest pointer-events-none whitespace-nowrap">
               长按开火释放 · Q / 武器键切换法术
             </div>
           )}
@@ -674,7 +674,7 @@ const SpellWheel: React.FC<{
   useUIButtonProps: UseUIBtnPropsFn;
 }> = ({ gameRef, magicState, onSelect, useUIButtonProps }) => {
   return (
-    <div className="absolute bottom-3 sm:bottom-5 left-1/2 -translate-x-1/2 z-20 flex gap-1.5 sm:gap-2 pointer-events-none">
+    <div className="absolute bottom-[max(20px,env(safe-area-inset-bottom))] sm:bottom-5 left-1/2 -translate-x-1/2 z-20 flex gap-1.5 sm:gap-2 pointer-events-none">
       {magicState.skills.map((spell, i) => (
         <SpellSlot
           key={spell.id}
