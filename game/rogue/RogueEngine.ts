@@ -8,7 +8,7 @@ import { EnemyLaser } from "../EnemyLaser";
 import { InputManager } from "../InputManager";
 import { Renderer } from "../Renderer";
 import { EntityType, WeaponType, GameSettings } from "../../types";
-import { MagicCircle } from "./MagicCircle";
+import { MagicCircle, MagicSpellFx, SpellContext } from "./MagicCircle";
 import {
     RogueState, RoguePhase, PerkId, PerkDef, CircleElement,
     createRogueState, computeModifiers, drawPerks
@@ -221,25 +221,10 @@ export class RogueEngine {
         const enemies = this.entities.filter(e => e instanceof Enemy && !e.markedForDeletion) as Enemy[];
         const playerPos = this.player.position;
 
-        // 法阵束缚 (CIRCLE_SLOW perk): 法阵范围内的小怪按减速 dt 推进
-        const slowFactor = this.state.modifiers.circleSlowFactor;
-        const slowCirclePos = this.magicCircle ? this.magicCircle.position : null;
-        const slowCircleR2 = this.magicCircle
-            ? this.magicCircle.effectRadius * this.magicCircle.effectRadius
-            : 0;
-
         this.entities.forEach(entity => {
             if (entity instanceof Missile) entity.update(dt, enemies);
             else if (entity instanceof Laser) entity.update(dt, enemies);
-            else if (entity instanceof Enemy && slowFactor > 0 && slowCirclePos && !entity.isBoss) {
-                // 小怪在法阵内使用减速 dt (Boss 不减速, 保持战斗张力)
-                const dx = entity.position.x - slowCirclePos.x;
-                const dy = entity.position.y - slowCirclePos.y;
-                const inCircle = dx * dx + dy * dy <= slowCircleR2;
-                entity.update(inCircle ? dt * (1 - slowFactor) : dt, playerPos);
-            } else {
-                entity.update(dt, playerPos);
-            }
+            else entity.update(dt, playerPos);
         });
 
         // ========== 敌人开火 (在 Enemy.update 之后, fireTimer 已被扣减) ==========
@@ -253,25 +238,11 @@ export class RogueEngine {
             }
         }
 
-        // ========== 魔法阵 tick ==========
+        // ========== 魔法阵: 自动施法系统 ==========
+        // 不再需要 tryTick / setActive — caster 内部自动循环施法
+        // (由 MagicCircle.update 推进, fire 时直接通过 SpellContext 推送效果实体)
         if (this.magicCircle) {
-            // 长按开火时激活 (伤害更高 + 视觉强化)
-            this.magicCircle.setActive(this.input.isFiring);
             this.magicCircle.update(dt);
-            const result = this.magicCircle.tryTick(enemies);
-            if (result && result.hit.length > 0) {
-                const dmgColor = this.magicCircle.element === CircleElement.FIRE ? '#fb923c' : '#c084fc';
-                for (const e of result.hit) {
-                    // 飘伤害数字, 让法阵有存在感
-                    this.entities.push(new FloatingText(
-                        e.position.x + (Math.random() - 0.5) * 20,
-                        e.position.y + (Math.random() - 0.5) * 10,
-                        Math.ceil(result.damage).toString(),
-                        dmgColor
-                    ));
-                    if (e.health <= 0) this.killEnemy(e);
-                }
-            }
         }
 
         // ========== 碰撞 ==========
@@ -364,6 +335,7 @@ export class RogueEngine {
                 else if (e instanceof Laser) Laser.draw(this.ctx, e);
                 else if (e instanceof EnemyLaser) EnemyLaser.draw(this.ctx, e);
                 else if (e instanceof Missile) Missile.draw(this.ctx, e);
+                else if (e instanceof MagicSpellFx) e.draw(this.ctx); // 魔法阵释放的所有特效
                 else if (e instanceof Particle) this.renderer.drawParticle(e);
                 else if (e instanceof FloatingText) this.renderer.drawFloatingText(e);
                 else if (e instanceof Shield) this.renderer.drawSkillShield(e);
@@ -438,12 +410,14 @@ export class RogueEngine {
         this.applyModifiersToPlayer();
         this.entities.push(this.player);
 
-        // 魔法阵
+        // 魔法阵: 自动施法系统
         if (this.state.starterWeapon === 'MAGIC_CIRCLE' && this.state.circleElement) {
-            this.magicCircle = new MagicCircle(this.player, this.state.circleElement, this.state.modifiers);
-            // 通用 FIRE_RATE_UP 也加速 tick (法阵武器的"射速"就是 tick 间隔)
-            // MagicCircle 内部已经用 circleTickMul, 这里再除一道 fireRateMultiplier
-            this.magicCircle.tickInterval /= this.state.modifiers.fireRateMultiplier;
+            this.magicCircle = new MagicCircle(
+                this.player,
+                this.state.circleElement,
+                this.state.modifiers,
+                this.makeSpellContext()
+            );
         } else {
             this.magicCircle = null;
         }
@@ -566,10 +540,40 @@ export class RogueEngine {
 
         // 重算 modifiers
         this.state.modifiers = computeModifiers(this.state.perks);
+        // 同步给施法器 (perk 影响法术冷却/伤害/范围/蓄力速度)
+        this.magicCircle?.updateModifiers(this.state.modifiers);
         this.state.perkChoices = [];
 
         // 下一层
         this.startLayer();
+    }
+
+    /** 给 MagicCircle 注入的能力包: 让法术效果可以推送实体 / 应用伤害 / 抖屏 */
+    private makeSpellContext(): SpellContext {
+        return {
+            // 用 函数 而不是直接传 this.entities 引用 — onLayerClear/updateFighting
+            // 会做 this.entities = this.entities.filter(...) 重建数组,
+            // 直接持引用会写到孤儿数组里.
+            pushEntity: (e) => { this.entities.push(e); },
+            getEnemies: () => this.entities.filter(e => e instanceof Enemy && !e.markedForDeletion) as Enemy[],
+            damageEnemy: (enemy, dmg, color) => {
+                if (enemy.markedForDeletion) return;
+                let d = dmg;
+                let crit = false;
+                if (Math.random() < this.state.modifiers.critChance) { d *= 2; crit = true; }
+                enemy.applyDamage(d);
+                this.entities.push(new FloatingText(
+                    enemy.position.x + (Math.random() - 0.5) * 20,
+                    enemy.position.y + (Math.random() - 0.5) * 10,
+                    Math.ceil(d).toString(),
+                    crit ? '#ff5555' : color
+                ));
+                if (enemy.health <= 0) this.killEnemy(enemy);
+            },
+            addShake: (intensity, duration) => this.addShake(intensity, duration),
+            width: this.width,
+            height: this.height,
+        };
     }
 
     private applyModifiersToPlayer() {
@@ -604,9 +608,7 @@ export class RogueEngine {
             this.player.fireRate = Math.max(30, 90 / m.fireRateMultiplier);
         }
 
-        // 魔法阵: FIRE_RATE_UP 也应用到法阵 tick 间隔上
-        // MagicCircle 在 startLayer 里会用当前 modifiers 新建, 所以这里不用手动改
-        // (下面我们会在 startLayer 构造 MagicCircle 之后, 把 fireRateMultiplier 作用到 tickInterval 上)
+        // 魔法阵: caster 由 startLayer 用最新 modifiers 重建, 选 perk 时也会调 updateModifiers
     }
 
     // ================== 武器开火 ==================
@@ -672,7 +674,7 @@ export class RogueEngine {
                 this.player.chargeLevel = Math.max(0, this.player.chargeLevel - this.player.chargeRate * dt * 2);
             }
         }
-        // MAGIC_CIRCLE: 不需要手动开火, MagicCircle.tryTick 每帧自动 tick
+        // MAGIC_CIRCLE: 不需要手动开火, MagicCircle.update 内部自动循环施法
     }
 
     // ================== 敌人开火 ==================
@@ -935,9 +937,10 @@ export class RogueEngine {
                 }
 
                 // Shield 反弹已在上面处理 (玩家侧)
-                // Shockwave 群伤
-                if (a.type === EntityType.SKILL_SHOCKWAVE || b.type === EntityType.SKILL_SHOCKWAVE) {
-                    const wave = (a.type === EntityType.SKILL_SHOCKWAVE ? a : b) as Shockwave;
+                // Shockwave 群伤 — 仅对真正的 Shockwave 实体生效
+                // (魔法阵的 NovaRing / AuraField 也用 SKILL_SHOCKWAVE 这个 type, 不能在这里被误判)
+                if (a instanceof Shockwave || b instanceof Shockwave) {
+                    const wave = (a instanceof Shockwave ? a : b) as Shockwave;
                     const other = a === wave ? b : a;
                     const dist = Math.sqrt((wave.position.x - other.position.x) ** 2 + (wave.position.y - other.position.y) ** 2);
                     if (Math.abs(dist - wave.radius) < 60) {

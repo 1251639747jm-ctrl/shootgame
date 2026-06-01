@@ -5,15 +5,46 @@
  *   选择初始武器 -> 第 N 层: 击败随机 Boss -> 选择增益 -> 下一层
  *
  * 初始武器: 机枪 / 激光 / 魔法阵 (三选一)
- * 魔法阵: 独立升级路线, 可选火系/电系派系
+ * 魔法阵: 自动施法系统, 选择火 / 电派系, 各 5 个独立技能
+ *         (技能在玩家处蓄力绘制对应法阵 -> 释放, 增益围绕 冷却/伤害/范围)
  */
 
 import { WeaponType, EntityType } from "../../types";
 
 // ================== 魔法阵派系 ==================
 export enum CircleElement {
-    FIRE = 'FIRE',       // 火系: 持续灼烧 + 范围爆炸
-    ELECTRIC = 'ELECTRIC' // 电系: 连锁闪电 + 眩晕
+    FIRE = 'FIRE',       // 火系: AOE / 范围爆发
+    ELECTRIC = 'ELECTRIC' // 电系: 单体追踪 / 连锁
+}
+
+// ================== 魔法阵技能 ID ==================
+export enum MagicSkillId {
+    // 火系 5 个
+    FIRE_METEOR  = 'FIRE_METEOR',   // 流星雨: 5 颗流星砸向目标点
+    FIRE_NOVA    = 'FIRE_NOVA',     // 火焰新星: 玩家周围环形火浪扩散
+    FIRE_MAGMA   = 'FIRE_MAGMA',    // 熔岩飞弹: 3 发追踪火球
+    FIRE_INFERNO = 'FIRE_INFERNO',  // 烈焰风暴: 持续 4s 旋转火域
+    FIRE_HAMMER  = 'FIRE_HAMMER',   // 火神之锤: Boss 头顶天降爆锤
+
+    // 电系 5 个
+    ELEC_CHAIN   = 'ELEC_CHAIN',    // 闪电链: 8 跳连锁
+    ELEC_THUNDER = 'ELEC_THUNDER',  // 天雷: 5 道随机天雷
+    ELEC_STATIC  = 'ELEC_STATIC',   // 静电场: 玩家持续电场
+    ELEC_RAILGUN = 'ELEC_RAILGUN',  // 电磁轨道炮: 高伤穿透电弧
+    ELEC_PLASMA  = 'ELEC_PLASMA',   // 电浆轰炸: 4 颗追踪电浆球
+}
+
+/** 魔法阵单个技能的元数据 */
+export interface MagicSkillDef {
+    id: MagicSkillId;
+    name: string;
+    castTime: number;       // 蓄力时长 (秒, 在玩家位置绘制法阵的时间)
+    cooldown: number;       // 冷却 (秒)
+    baseDamage: number;     // 基础伤害 (受 dmgMul 影响)
+    baseRange: number;      // 基础范围参数 (语义因技能而异: 半径/距离/宽度等, 受 rangeMul 影响)
+    color: string;          // 法阵主色
+    runeStyle: number;      // 法阵图案样式 ID (0..9)
+    desc: string;           // UI 描述
 }
 
 // ================== 肉鸽状态枚举 ==================
@@ -45,11 +76,13 @@ export enum PerkId {
     SKILL_CD_DOWN   = 'SKILL_CD_DOWN',   // 技能冷却 -25%
 
     // 魔法阵专属 (仅当武器 = MAGIC_CIRCLE 时出现)
-    CIRCLE_RADIUS_UP = 'CIRCLE_RADIUS_UP',   // 法阵半径 +20%
-    CIRCLE_TICK_UP   = 'CIRCLE_TICK_UP',     // 法阵 tick 频率 +30%
-    CIRCLE_BURN_UP   = 'CIRCLE_BURN_UP',     // (火) 灼烧伤害 +40%
-    CIRCLE_CHAIN_UP  = 'CIRCLE_CHAIN_UP',    // (电) 连锁数 +2
-    CIRCLE_SLOW      = 'CIRCLE_SLOW',        // 法阵内敌人减速 50%
+    //   全部围绕"冷却 / 伤害 / 范围"三类
+    CIRCLE_CD_DOWN     = 'CIRCLE_CD_DOWN',     // 法术冷却 -20%
+    CIRCLE_DMG_UP      = 'CIRCLE_DMG_UP',      // 法术伤害 +30%
+    CIRCLE_RANGE_UP    = 'CIRCLE_RANGE_UP',    // 法术范围 +25%
+    CIRCLE_QUICK_CAST  = 'CIRCLE_QUICK_CAST',  // 蓄力时长 -30% (=施法更快, 等价于变相缩短冷却)
+    CIRCLE_OVERCHARGE  = 'CIRCLE_OVERCHARGE',  // 强力组合: 伤害 +50% & 范围 +30% (unique)
+    CIRCLE_HASTE       = 'CIRCLE_HASTE',       // 强力组合: 冷却 -40% (unique)
 
     // 激光专属
     LASER_DPS_UP     = 'LASER_DPS_UP',       // 激光 DPS +30%
@@ -109,12 +142,11 @@ export interface RogueModifiers {
     critChance: number;         // 0.0 ~ 1.0
     skillCdMultiplier: number;  // 1.0 = 基础, 越低越好
 
-    // 魔法阵
-    circleRadiusMul: number;
-    circleTickMul: number;
-    circleBurnMul: number;
-    circleChainBonus: number;
-    circleSlowFactor: number;
+    // 魔法阵 (新): 全部围绕 冷却 / 伤害 / 范围
+    circleCdMul: number;        // 1.0 = 基础, < 1 缩短法术冷却
+    circleDmgMul: number;       // 1.0 = 基础, > 1 增加法术伤害
+    circleRangeMul: number;     // 1.0 = 基础, > 1 扩大法术范围
+    circleCastSpeedMul: number; // 1.0 = 基础, < 1 蓄力更快 (相当于减冷却)
 
     // 激光
     laserDpsMul: number;
@@ -159,7 +191,7 @@ export const STARTER_OPTIONS: StarterConfig[] = [
     {
         key: 'MAGIC_CIRCLE',
         name: '魔法阵',
-        desc: '持续范围伤害, 可选火系(灼烧)或电系(连锁)',
+        desc: '自动施法系统, 在战机处蓄力绘制法阵后释放各式法术',
         color: '#a855f7',
         icon: '🔮'
     }
@@ -170,7 +202,7 @@ export const PERK_POOL: PerkDef[] = [
     // 通用
     { id: PerkId.DMG_UP, name: '伤害强化', desc: '全局伤害 +25%', icon: '⚔️', color: '#ef4444' },
     { id: PerkId.FIRE_RATE_UP, name: '射速强化', desc: '射速 +20%', icon: '💨', color: '#f97316' },
-    // 散射只对机枪有意义 (加副弹), 激光/法阵选了毫无作用, 所以限死 VULCAN.
+    // 散射只对机枪有意义
     { id: PerkId.SPREAD_UP, name: '散射强化', desc: '散射弹数 +2', icon: '🌟', color: '#eab308', requireWeapon: 'VULCAN' },
     { id: PerkId.MAX_HP_UP, name: '生命强化', desc: '最大血量 +30, 立即回满', icon: '❤️', color: '#22c55e', maxStack: 5 },
     { id: PerkId.HEAL, name: '紧急修复', desc: '立即回复 50% 血量', icon: '💚', color: '#10b981' },
@@ -184,12 +216,13 @@ export const PERK_POOL: PerkDef[] = [
     { id: PerkId.UNLOCK_SHOCKWAVE, name: '冲击波芯片', desc: '解锁"冲击波"主动技能', icon: '💫', color: '#fbbf24', unique: true },
     { id: PerkId.SKILL_CD_DOWN, name: '冷却优化', desc: '所有技能冷却 -25%', icon: '⏱️', color: '#8b5cf6', maxStack: 3 },
 
-    // 魔法阵
-    { id: PerkId.CIRCLE_RADIUS_UP, name: '法阵扩展', desc: '法阵半径 +20%', icon: '⭕', color: '#c084fc', requireWeapon: 'MAGIC_CIRCLE', maxStack: 4 },
-    { id: PerkId.CIRCLE_TICK_UP, name: '法阵频率', desc: 'Tick 频率 +30%', icon: '🔄', color: '#a78bfa', requireWeapon: 'MAGIC_CIRCLE', maxStack: 3 },
-    { id: PerkId.CIRCLE_BURN_UP, name: '烈焰强化', desc: '灼烧伤害 +40%', icon: '🔥', color: '#f97316', requireWeapon: 'MAGIC_CIRCLE', requireElement: CircleElement.FIRE, maxStack: 4 },
-    { id: PerkId.CIRCLE_CHAIN_UP, name: '连锁扩展', desc: '闪电连锁数 +2', icon: '⚡', color: '#38bdf8', requireWeapon: 'MAGIC_CIRCLE', requireElement: CircleElement.ELECTRIC, maxStack: 3 },
-    { id: PerkId.CIRCLE_SLOW, name: '法阵束缚', desc: '法阵内敌人减速 50%', icon: '🕸️', color: '#d946ef', requireWeapon: 'MAGIC_CIRCLE', unique: true },
+    // 魔法阵 (新): 全部围绕 冷却 / 伤害 / 范围
+    { id: PerkId.CIRCLE_CD_DOWN,    name: '法术冷却',   desc: '魔法阵冷却 -20%',           icon: '⏱️', color: '#a78bfa', requireWeapon: 'MAGIC_CIRCLE', maxStack: 4 },
+    { id: PerkId.CIRCLE_DMG_UP,     name: '法术增幅',   desc: '魔法阵伤害 +30%',           icon: '🔥', color: '#f43f5e', requireWeapon: 'MAGIC_CIRCLE', maxStack: 5 },
+    { id: PerkId.CIRCLE_RANGE_UP,   name: '法术扩域',   desc: '魔法阵范围 +25%',           icon: '⭕', color: '#c084fc', requireWeapon: 'MAGIC_CIRCLE', maxStack: 4 },
+    { id: PerkId.CIRCLE_QUICK_CAST, name: '极速蓄力',   desc: '蓄力时长 -30% (减冷却)',     icon: '⚡', color: '#22d3ee', requireWeapon: 'MAGIC_CIRCLE', maxStack: 2 },
+    { id: PerkId.CIRCLE_OVERCHARGE, name: '法术超载',   desc: '伤害 +50% & 范围 +30%',     icon: '✨', color: '#fb7185', requireWeapon: 'MAGIC_CIRCLE', unique: true },
+    { id: PerkId.CIRCLE_HASTE,      name: '魔能急行',   desc: '所有法术冷却 -40%',         icon: '🌀', color: '#7c3aed', requireWeapon: 'MAGIC_CIRCLE', unique: true },
 
     // 激光
     { id: PerkId.LASER_DPS_UP, name: '光束增幅', desc: '激光 DPS +30%', icon: '🔆', color: '#38bdf8', requireWeapon: 'LASER', maxStack: 4 },
@@ -215,11 +248,10 @@ export function computeModifiers(perks: PerkId[]): RogueModifiers {
         moveSpeedMultiplier: 1,
         critChance: 0,
         skillCdMultiplier: 1,
-        circleRadiusMul: 1,
-        circleTickMul: 1,
-        circleBurnMul: 1,
-        circleChainBonus: 0,
-        circleSlowFactor: 0,
+        circleCdMul: 1,
+        circleDmgMul: 1,
+        circleRangeMul: 1,
+        circleCastSpeedMul: 1,
         laserDpsMul: 1,
         laserWidthMul: 1,
         laserCdReduction: 0,
@@ -246,11 +278,13 @@ export function computeModifiers(perks: PerkId[]): RogueModifiers {
             case PerkId.UNLOCK_BLACKHOLE: m.hasBlackhole = true; break;
             case PerkId.UNLOCK_SHOCKWAVE: m.hasShockwave = true; break;
 
-            case PerkId.CIRCLE_RADIUS_UP: m.circleRadiusMul *= 1.2; break;
-            case PerkId.CIRCLE_TICK_UP:   m.circleTickMul *= 1.3; break;
-            case PerkId.CIRCLE_BURN_UP:   m.circleBurnMul *= 1.4; break;
-            case PerkId.CIRCLE_CHAIN_UP:  m.circleChainBonus += 2; break;
-            case PerkId.CIRCLE_SLOW:      m.circleSlowFactor = 0.5; break;
+            // 魔法阵 (新)
+            case PerkId.CIRCLE_CD_DOWN:    m.circleCdMul *= 0.8; break;
+            case PerkId.CIRCLE_DMG_UP:     m.circleDmgMul *= 1.3; break;
+            case PerkId.CIRCLE_RANGE_UP:   m.circleRangeMul *= 1.25; break;
+            case PerkId.CIRCLE_QUICK_CAST: m.circleCastSpeedMul *= 0.7; break;
+            case PerkId.CIRCLE_OVERCHARGE: m.circleDmgMul *= 1.5; m.circleRangeMul *= 1.3; break;
+            case PerkId.CIRCLE_HASTE:      m.circleCdMul *= 0.6; break;
 
             case PerkId.LASER_DPS_UP:     m.laserDpsMul *= 1.3; break;
             case PerkId.LASER_WIDTH_UP:   m.laserWidthMul *= 1.4; break;

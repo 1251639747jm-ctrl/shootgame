@@ -125,9 +125,9 @@ export class RogueUI {
         this.elementCardRects = [];
         const options = [
             { key: CircleElement.FIRE, name: '火系', icon: '🔥', color: '#fb923c',
-              desc: '阵内 AOE 持续灼烧, 附带爆发脉冲 · 适合站桩输出' },
+              desc: '5种法阵自动循环施法 · 流星雨 / 火焰新星 / 熔岩飞弹 / 烈焰风暴 / 火神之锤' },
             { key: CircleElement.ELECTRIC, name: '电系', icon: '⚡', color: '#a78bfa',
-              desc: '连锁闪电跳跃全屏, 忽略范围限制 · 适合小怪清场' }
+              desc: '5种法阵自动循环施法 · 闪电链 / 天雷 / 静电场 / 电磁轨道炮 / 电浆轰炸' }
         ];
 
         options.forEach((opt, i) => {
